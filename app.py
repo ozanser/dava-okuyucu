@@ -92,7 +92,6 @@ st.markdown("---")
 dosya = st.file_uploader("Analiz Edilecek PDF Dosyasını Yükleyin", type="pdf")
 
 if dosya:
-    # Dosya değiştiğinde analizi yap ve session state'e kaydet
     if "analiz_sonucu" not in st.session_state or st.session_state.dosya_adi != dosya.name:
         with st.spinner("Dosya okunuyor..."):
             text = pdf_oku(dosya)
@@ -101,19 +100,16 @@ if dosya:
     
     veri = st.session_state.analiz_sonucu
 
-    # --- DETAYLI BİLGİ ALANLARI (FORM VE BUTONLAR YOK) ---
+    # --- DETAYLI BİLGİ ALANLARI ---
     st.subheader("📝 Analiz Detayları")
     
     # 1. SATIR
     st.write("###### 🗂 Dosya Kimliği")
     c1, c2, c3, c4 = st.columns(4)
     
-    turler = ["⚖️ ÖZEL HUKUK", "🛑 CEZA HUKUKU", "⚡ İCRA HUKUKU", "🏛️ İDARE HUKUKU"]
-    secili_idx = 0
-    if veri["Dava Türü"] in turler: secili_idx = turler.index(veri["Dava Türü"])
+    # TÜR: Selectbox yerine Text Input + Disabled yaptık
+    c1.text_input("Hukuk Türü", value=veri["Dava Türü"], disabled=True)
     
-    # Otomatik seçili gelir, kullanıcı isterse değiştirebilir, anında güncellenir
-    y_tur = c1.selectbox("Tür", turler, index=secili_idx)
     y_mahkeme = c2.text_input("Mahkeme", veri["Mahkeme"])
     y_esas = c3.text_input("Esas No", veri["Esas No"])
     y_karar = c4.text_input("Karar No", veri["Karar No"])
@@ -139,7 +135,10 @@ if dosya:
     st.markdown("---")
     st.write("###### 💰 Mali Detaylar")
     m_c0, m_c1, m_c2, m_c3 = st.columns(4)
-    y_sonuc = m_c0.selectbox("Sonuç", ["✅ KABUL", "❌ RED", "⚠️ KISMEN KABUL", "❓ Belirsiz"], index=0)
+    
+    # SONUÇ: Selectbox yerine Text Input + Disabled yaptık
+    m_c0.text_input("Sonuç", value=veri["Sonuç"], disabled=True)
+    
     y_vekalet = m_c1.text_input("Vekalet", veri["Vekalet Ücreti"])
     y_gider = m_c2.text_input("Gider", veri["Yargılama Gideri"])
     y_harc = m_c3.text_input("Harç", veri["Harç"])
