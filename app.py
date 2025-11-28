@@ -4,110 +4,144 @@ import re
 import pandas as pd
 from collections import Counter
 
-# Sayfa Ayarları
-st.set_page_config(page_title="Akıllı Hukuk Asistanı", layout="wide", page_icon="⚖️")
+# --- SAYFA AYARLARI ---
+st.set_page_config(page_title="Hukuk Bürosu Paneli", layout="wide", page_icon="⚖️")
 
-# --- SOL MENÜ ---
-with st.sidebar:
-    st.title("⚖️ Hukuk Asistanı")
-    st.info("Bu sürüm 'Konu' kısmını metin içeriğine göre tahmin eder.")
-    st.write("---")
-
-# --- ANA SAYFA ---
-st.title("📄 Gelişmiş Dava Analizcisi")
-st.markdown("PDF dosyanızı yükleyin, sistem davanın türünü ve detaylarını çıkarsın.")
-
-uploaded_file = st.file_uploader("", type="pdf")
-
-# --- AKILLI FONKSİYONLAR ---
+# --- FONKSİYONLAR ---
 
 def pdf_metin_oku(dosya):
+    """PDF'ten metni çeker."""
     okuyucu = PyPDF2.PdfReader(dosya)
     metin = ""
-    for sayfa in okuyucu.pages:
+    # Sadece ilk 5 sayfayı okumak hız kazandırır ve genelde yeterlidir
+    for sayfa in okuyucu.pages[:5]:
         metin += sayfa.extract_text() or ""
     return metin
 
+def mahkeme_bul(metin):
+    """Metnin başındaki T.C. ... MAHKEMESİ ibaresini arar."""
+    kalip = r"(T\.?C\.?.*?MAHKEMESİ)"
+    bulunan = re.search(kalip, metin, re.IGNORECASE | re.DOTALL)
+    if bulunan:
+        return bulunan.group(1).replace("\n", " ").strip()
+    return "Mahkeme Belirtilmemiş"
+
 def konu_tahmin_et(metin):
-    """
-    Önce başlık arar, bulamazsa kelime sayarak tahmin yürütür.
-    """
+    """Dava türünü tahmin eder."""
     metin_lower = metin.lower()
     
-    # 1. YÖNTEM: Açıkça yazılmış başlık ara
-    baslik_kalibi = r"(?i)(KONU|DAVA KONUSU|TALEP KONUSU)\s*[:;]\s*(.*?)(?=\n|AÇIKLAMA)"
-    bulunan = re.search(baslik_kalibi, metin, re.DOTALL)
-    
-    if bulunan:
-        # Başlık bulduysa temizleyip döndür
-        return bulunan.group(2).strip()[:200].replace("\n", " ")
-    
-    # 2. YÖNTEM: Başlık yoksa, kelime avına çık (Puanlama Sistemi)
-    # Hangi kelime hangi dava türüne işaret eder?
     kategoriler = {
-        "Boşanma / Aile Hukuku": ["boşanma", "velayet", "nafaka", "ziynet", "mal rejimi", "evlilik birliği"],
-        "İş Hukuku / Alacak": ["kıdem", "ihbar", "fazla mesai", "işe iade", "iş akdi", "maaş"],
-        "Ceza Hukuku": ["sanık", "suç", "ceza", "hapis", "beraat", "hakaret", "tehdit", "yaralama"],
-        "Gayrimenkul / Tapu": ["tapu", "tahliye", "kira", "ecrimisil", "arsa", "kamulaştırma"],
-        "Borçlar / Ticaret": ["alacak", "senet", "fatura", "icra", "itirazın iptali", "tazminat"]
+        "Boşanma / Aile": ["boşanma", "velayet", "nafaka", "ziynet", "aile mahkemesi"],
+        "İş / Alacak": ["kıdem", "ihbar", "işe iade", "fazla mesai", "sgk", "iş mahkemesi"],
+        "Ceza Dosyası": ["sanık", "suç", "ceza", "hapis", "beraat", "ağır ceza", "asliye ceza"],
+        "Gayrimenkul": ["tapu", "tahliye", "kira", "ecrimisil", "kadastro"],
+        "İcra / Borç": ["icra", "alacak", "borç", "haciz", "taahhüt"]
     }
     
     skorlar = {}
-    
     for kategori, kelimeler in kategoriler.items():
         skor = 0
         for kelime in kelimeler:
             skor += metin_lower.count(kelime)
         skorlar[kategori] = skor
     
-    # En yüksek puanı alan kategoriyi bul
-    en_yuksek_kategori = max(skorlar, key=skorlar.get)
-    
-    # Eğer hiçbiri geçmiyorsa (Skor 0 ise)
-    if skorlar[en_yuksek_kategori] == 0:
-        return "Genel Hukuk Davası (Konu tespit edilemedi)"
-    
-    return f"{en_yuksek_kategori} (Otomatik Tespit)"
+    en_yuksek = max(skorlar, key=skorlar.get)
+    return en_yuksek if skorlar[en_yuksek] > 0 else "Genel / Belirsiz"
 
-def analiz_et(metin):
-    # Standart verileri çek
-    aramalar = {
-        "Davacı": r"DAVACI\s*[:;]\s*(.*?)(?=\n)",
-        "Davalı": r"DAVALI\s*[:;]\s*(.*?)(?=\n)",
-        "Esas No": r"ESAS\s*NO\s*[:;]?\s*(\d{4}/\d+)",
-        "Karar/Sonuç": r"(HÜKÜM|KARAR|SONUÇ)\s*[:;]\s*(.*)"
+def detayli_analiz(metin, dosya_adi):
+    """Tek bir dosya için tüm analizleri yapar."""
+    bilgiler = {
+        "Dosya Adı": dosya_adi,
+        "Mahkeme": mahkeme_bul(metin),
+        "Dava Türü": konu_tahmin_et(metin)
     }
     
-    sonuclar = {}
+    aramalar = {
+        "Esas No": r"ESAS\s*NO\s*[:;]?\s*(\d{4}/\d+)",
+        "Karar No": r"KARAR\s*NO\s*[:;]?\s*(\d{4}/\d+)",
+        "Tarih": r"(\d{1,2}[./]\d{1,2}[./]\d{4})",
+        "Davacı": r"DAVACI\s*[:;]\s*(.*?)(?=\n)",
+        "Davalı": r"DAVALI\s*[:;]\s*(.*?)(?=\n)"
+    }
     
-    # Regex ile standart verileri al
     for baslik, kalip in aramalar.items():
         bulunan = re.search(kalip, metin, re.IGNORECASE | re.DOTALL)
-        deger = bulunan.group(1).strip()[:200] if bulunan else "-"
-        sonuclar[baslik] = deger.replace("\n", " ")
-    
-    # Konuyu özel fonksiyonumuzla bul
-    sonuclar["Konu / Dava Türü"] = konu_tahmin_et(metin)
-    
-    return sonuclar
+        deger = bulunan.group(1).strip()[:100] if bulunan else "-"
+        bilgiler[baslik] = deger.replace("\n", " ")
+        
+    return bilgiler
 
-# --- ÇALIŞTIRMA ---
-if uploaded_file:
-    metin = pdf_metin_oku(uploaded_file)
-    if len(metin) > 50:
-        veriler = analiz_et(metin)
+# --- ARAYÜZ TASARIMI ---
+
+st.title("⚖️ Toplu Dava Yönetim Paneli")
+st.markdown("Birden fazla dava dosyasını (PDF) aynı anda yükleyin, sistem hepsini tek tabloda özetlesin.")
+
+# ÇOKLU DOSYA YÜKLEME (accept_multiple_files=True)
+uploaded_files = st.file_uploader("Dosyaları Sürükleyip Bırakın (Çoklu Seçim Yapabilirsiniz)", 
+                                  type="pdf", 
+                                  accept_multiple_files=True)
+
+if uploaded_files:
+    tum_veriler = []
+    
+    # İlerleme Çubuğu (Bar)
+    bar = st.progress(0)
+    toplam_dosya = len(uploaded_files)
+    
+    for i, dosya in enumerate(uploaded_files):
+        # Her dosyayı sırayla işle
+        metin = pdf_metin_oku(dosya)
+        if len(metin) > 50:
+            veri = detayli_analiz(metin, dosya.name)
+            tum_veriler.append(veri)
         
-        # Ekrana Yazdır
-        st.subheader("📋 Analiz Sonuçları")
+        # İlerleme çubuğunu güncelle
+        bar.progress((i + 1) / toplam_dosya)
+    
+    # Verileri Tabloya (DataFrame) Dönüştür
+    df = pd.DataFrame(tum_veriler)
+    
+    if not df.empty:
+        # --- İSTATİSTİK PANELİ (Üst Kısım) ---
+        st.write("---")
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Toplam Dosya", len(df))
+        col2.metric("En Çok Görülen Dava", df["Dava Türü"].mode()[0] if not df.empty else "-")
+        col3.metric("Tespit Edilen Mahkemeler", df["Mahkeme"].nunique())
+
+        # --- GRAFİKSEL GÖSTERİM ---
+        # Sol tarafta Dava Türü Dağılımı
+        col_grafik1, col_grafik2 = st.columns([1, 2])
         
-        # Özel vurgulu gösterim (Metrics)
-        col1, col2 = st.columns(2)
-        col1.success(f"**Tespit Edilen Konu:**\n\n{veriler['Konu / Dava Türü']}")
-        col2.info(f"**Esas No:** {veriler['Esas No']}")
-        
-        # Diğer detaylar tablo olarak
-        df = pd.DataFrame(list(veriler.items()), columns=["Alan", "Bilgi"])
-        st.table(df)
-        
+        with col_grafik1:
+            st.subheader("Dava Türü Dağılımı")
+            tur_sayilari = df["Dava Türü"].value_counts()
+            st.bar_chart(tur_sayilari)
+
+        with col_grafik2:
+            st.subheader("📄 Detaylı Dosya Listesi")
+            st.dataframe(df) # İnteraktif tablo
+            
+        # --- EXCEL İNDİRME ---
+        st.write("---")
+        csv = df.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📥 Tüm Listeyi Excel (CSV) Olarak İndir",
+            data=csv,
+            file_name='dava_listesi_ozeti.csv',
+            mime='text/csv',
+            use_container_width=True
+        )
     else:
-        st.error("Metin okunamadı.")
+        st.error("Yüklenen dosyalardan metin okunamadı.")
+        
+else:
+    st.info("👆 Başlamak için yukarıya bir veya daha fazla PDF dosyası bırakın.")
+
+# --- SIDEBAR BİLGİ ---
+with st.sidebar:
+    st.header("Nasıl Kullanılır?")
+    st.write("1. Bilgisayarınızdaki dava klasörüne gidin.")
+    st.write("2. İstediğiniz kadar PDF'i seçin.")
+    st.write("3. Hepsini buraya sürükleyin.")
+    st.success("Sistem otomatik olarak:\n* Mahkemeyi\n* Konuyu\n* Tarafları\nayıklar ve listeler.")
