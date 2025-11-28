@@ -13,7 +13,7 @@ VERITABANI_DOSYASI = "dava_arsivi.csv"
 def veritabani_yukle():
     if os.path.exists(VERITABANI_DOSYASI): return pd.read_csv(VERITABANI_DOSYASI)
     cols = ["Dosya Adı", "Mahkeme", "Esas No", "Karar No", "Dava Konusu", 
-            "Davacı", "Davacı Vekili", "Davalı", 
+            "Davacı", "Davacı Vekili", "Davalı", "Davalı Vekili", # <-- Davalı Vekili Eklendi
             "Dava Tarihi", "Karar Tarihi", "Sonuç", 
             "Vekalet Ücreti", "Yargılama Gideri", "Harç"]
     return pd.DataFrame(columns=cols)
@@ -25,12 +25,8 @@ def veritabanina_kaydet(yeni_veri):
     df.to_csv(VERITABANI_DOSYASI, index=False)
 
 def metni_temizle(metin):
-    # Satırları birleştir
     temiz = metin.replace("\n", " ").strip()
     temiz = re.sub(r'\s+', ' ', temiz)
-    
-    # OCR Soru işaretlerini temizle (Örn: 1.201,43?)
-    # Eğer rakamın sonundaysa sil, ortasındaysa 0 yap
     temiz = re.sub(r'(?<=\d)\?(?=\d)', '0', temiz) 
     temiz = re.sub(r'(?<=\d)\?', '', temiz) 
     
@@ -49,7 +45,6 @@ def pdf_oku(dosya):
 
 def para_bul(metin, anahtar_kelime_grubu):
     for anahtar in anahtar_kelime_grubu:
-        # Regex: Anahtar kelimenin 100 karakter sağında veya solunda rakam+TL ara
         regex = fr"([\d\.,]+\s*TL).{{0,100}}?{anahtar}|{anahtar}.{{0,100}}?([\d\.,]+\s*TL)"
         m = re.search(regex, metin, re.IGNORECASE)
         if m: return (m.group(1) or m.group(2)).strip()
@@ -59,35 +54,44 @@ def analiz_yap(metin, dosya_adi):
     metin = metni_temizle(metin)
     bilgi = {"Dosya Adı": dosya_adi}
     
-    # Künye Regex (DÜZELTİLDİ: \bDAVA\b kullanıldı)
+    # Künye Regex
     regexler = {
         "Mahkeme": r"(T\.?C\.?.*?MAHKEMES.*?)Esas",
         "Esas No": r"ESAS\s*NO\s*[:;]?\s*['\"]?,?[:]?\s*(\d{4}/\d+)",
         "Karar No": r"KARAR\s*NO\s*[:;]?\s*['\"]?,?[:]?\s*(\d{4}/\d+)",
-        # BURADA DÜZELTME YAPILDI: Sadece 'DAVA' kelimesini arar, 'DAVACI'yı atlar.
         "Dava Konusu": r"\bDAVA\b\s*[:;]?\s*(.*?)(?=DAVA TARİHİ|KARAR TARİHİ|ESAS)",
         "Davacı": r"DAVACI\s*[:;]?\s*(.*?)(?=VEKİL|DAVALI)",
+        
+        # Davacı Vekili: Davacı ile Davalı arasında ara
         "Davacı Vekili": r"(?:DAVACI\s*)?VEKİL[İI]\s*[:;]?\s*(.*?)(?=DAVALI|DAVA)",
+        
         "Davalı": r"DAVALI\s*[:;]?\s*(.*?)(?=VEKİL|DAVA|KONU)",
+        
+        # Davalı Vekili: Davalı ile Dava/Konu arasında ara (YENİ)
+        # Eğer Davalı'dan sonra Vekil kelimesi geliyorsa yakalar.
+        "Davalı Vekili": r"DAVALI.*?VEKİL[İI]\s*[:;]?\s*(.*?)(?=DAVA|KONU)",
+        
         "Dava Tarihi": r"DAVA\s*TARİH[İI]\s*[:;]?\s*(\d{2}[./]\d{2}[./]\d{4})",
         "Karar Tarihi": r"KARAR\s*TARİH[İI]\s*[:;]?\s*(\d{2}[./]\d{2}[./]\d{4})"
     }
+    
     for k, v in regexler.items():
         m = re.search(v, metin, re.IGNORECASE)
         if m:
             raw_val = m.group(1).strip().replace(":", "")
             bilgi[k] = raw_val
         else:
-            bilgi[k] = "-"
+            # Bulamazsa BOŞ BIRAK (Tire (-) koyma)
+            bilgi[k] = "" 
 
     # Sonuç
-    alan = metin.upper()[-3000:] # Arama alanını genişlettik
+    alan = metin.upper()[-3000:]
     if "KISMEN KABUL" in alan: bilgi["Sonuç"] = "⚠️ KISMEN KABUL"
     elif re.search(r"DAVANIN\s*KABUL", alan) or re.search(r"İTİRAZIN\s*İPTAL", alan): bilgi["Sonuç"] = "✅ KABUL"
     elif re.search(r"DAVANIN\s*RED", alan): bilgi["Sonuç"] = "❌ RED"
     else: bilgi["Sonuç"] = "❓ Belirsiz"
 
-    # Mali (Anahtar kelimeler artırıldı)
+    # Mali
     bilgi["Vekalet Ücreti"] = para_bul(alan, ["vekalet ücreti", "ücreti vekalet"])
     bilgi["Yargılama Gideri"] = para_bul(alan, ["toplam yargılama gideri", "yapılan masraf", "yargılama giderinin"])
     bilgi["Harç"] = para_bul(alan, ["bakiye", "karar harcı", "eksik kalan"])
@@ -143,12 +147,16 @@ if dosya:
         y_dava_t = c_tar1.text_input("Dava Tarihi", veri["Dava Tarihi"])
         y_karar_t = c_tar2.text_input("Karar Tarihi", veri["Karar Tarihi"])
 
-        # 3. SATIR: Taraflar
+        # 3. SATIR: Taraflar (Artık 4 Kolon: Davacı, Vekili, Davalı, Vekili)
         st.markdown("---")
-        c4, c5, c6 = st.columns(3)
+        st.write("###### 👥 Taraflar")
+        c4, c5 = st.columns(2)
         y_davaci = c4.text_input("Davacı", veri["Davacı"])
-        y_vekil = c5.text_input("Davacı Vekili", veri["Davacı Vekili"])
+        y_d_vekil = c5.text_input("Davacı Vekili", veri["Davacı Vekili"])
+        
+        c6, c7 = st.columns(2)
         y_davali = c6.text_input("Davalı", veri["Davalı"])
+        y_davali_vekil = c7.text_input("Davalı Vekili", veri["Davalı Vekili"]) # <-- Yeni Kutu
         
         # 4. SATIR: Mali Detaylar
         st.markdown("---")
@@ -163,7 +171,8 @@ if dosya:
             kayit = {
                 "Dosya Adı": veri["Dosya Adı"], "Mahkeme": y_mahkeme,
                 "Esas No": y_esas, "Karar No": y_karar, "Dava Konusu": y_konu,
-                "Davacı": y_davaci, "Davacı Vekili": y_vekil, "Davalı": y_davali,
+                "Davacı": y_davaci, "Davacı Vekili": y_d_vekil, 
+                "Davalı": y_davali, "Davalı Vekili": y_davali_vekil,
                 "Dava Tarihi": y_dava_t, "Karar Tarihi": y_karar_t,
                 "Sonuç": y_sonuc, "Vekalet Ücreti": y_vekalet, 
                 "Yargılama Gideri": y_gider, "Harç": y_harc
