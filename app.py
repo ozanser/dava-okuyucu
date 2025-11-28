@@ -2,31 +2,26 @@ import streamlit as st
 import PyPDF2
 import re
 import pandas as pd
-import os
+import io
 
 # --- 1. AYARLAR ---
-st.set_page_config(page_title="Hukuk Asistanı", layout="wide", page_icon="⚖️")
-VERITABANI_DOSYASI = "dava_arsivi.csv"
+st.set_page_config(page_title="Hukuk Asistanı (Dev)", layout="wide", page_icon="🛠️")
 
-# --- 2. FONKSİYONLAR ---
+# --- 2. CSS TASARIMI (Sade) ---
+st.markdown("""
+<style>
+    .main { background-color: #f8f9fa; }
+    div[data-testid="stForm"] { background-color: white; padding: 20px; border-radius: 10px; border: 1px solid #ddd; }
+    h1 { color: #2c3e50; }
+</style>
+""", unsafe_allow_html=True)
 
-def veritabani_yukle():
-    if os.path.exists(VERITABANI_DOSYASI): return pd.read_csv(VERITABANI_DOSYASI)
-    cols = ["Dosya Adı", "Dava Türü", "Mahkeme", "Esas No", "Karar No", "Dava Konusu", 
-            "Davacı", "Davacı Vekili", "Davalı", "Davalı Vekili",
-            "Dava Tarihi", "Karar Tarihi", "Sonuç", 
-            "Vekalet Ücreti", "Yargılama Gideri", "Harç"]
-    return pd.DataFrame(columns=cols)
-
-def veritabanina_kaydet(yeni_veri):
-    df = veritabani_yukle()
-    yeni_satir = pd.DataFrame([yeni_veri])
-    df = pd.concat([df, yeni_satir], ignore_index=True)
-    df.to_csv(VERITABANI_DOSYASI, index=False)
+# --- 3. FONKSİYONLAR ---
 
 def metni_temizle(metin):
     temiz = metin.replace("\n", " ").strip()
     temiz = re.sub(r'\s+', ' ', temiz)
+    # OCR Soru işareti temizliği
     temiz = re.sub(r'(?<=\d)\?(?=\d)', '0', temiz) 
     temiz = re.sub(r'(?<=\d)\?', '', temiz) 
     
@@ -59,8 +54,8 @@ def dava_turu_belirle(mahkeme_adi, metin):
     if "idare" in mahkeme_lower or "vergi" in mahkeme_lower: return "🏛️ İDARE HUKUKU"
     if "sulh hukuk" in mahkeme_lower or "asliye hukuk" in mahkeme_lower or "aile" in mahkeme_lower or "iş" in mahkeme_lower: return "⚖️ ÖZEL HUKUK"
     
-    if "sanık" in metin_lower or "suç" in metin_lower or "beraat" in metin_lower: return "🛑 CEZA HUKUKU"
-    if "yürütmenin durdurulması" in metin_lower or "iptali" in metin_lower: return "🏛️ İDARE HUKUKU"
+    if "sanık" in metin_lower or "suç" in metin_lower: return "🛑 CEZA HUKUKU"
+    if "yürütme" in metin_lower or "iptali" in metin_lower: return "🏛️ İDARE HUKUKU"
     if "ödeme emri" in metin_lower or "takip" in metin_lower: return "⚡ İCRA HUKUKU"
     
     return "⚖️ ÖZEL HUKUK"
@@ -99,57 +94,51 @@ def analiz_yap(metin, dosya_adi):
     bilgi["Harç"] = para_bul(alan, ["bakiye", "karar harcı", "eksik kalan"])
     return bilgi
 
-# --- 3. ARAYÜZ ---
+# --- 4. ARAYÜZ ---
 
-st.title("⚖️ Hukuk Asistanı")
+st.title("🛠️ Hukuk Asistanı (Geliştirme Modu)")
+st.info("Bu modda veritabanı kaydı yapılmaz. Sadece PDF okuma ve analiz testi yapılır.")
 
-# Sidebar
-with st.sidebar:
-    st.header("Arşiv")
-    df = veritabani_yukle()
-    st.metric("Kayıtlı Dosya", len(df))
-    if not df.empty:
-        st.dataframe(df[["Esas No", "Dava Türü", "Sonuç"]].tail(10), hide_index=True)
-        st.download_button("Excel İndir", df.to_csv(index=False).encode('utf-8'), "arsiv.csv")
-
-# Upload
-dosya = st.file_uploader("Karar Dosyası Yükle (PDF)", type="pdf")
+# Dosya Yükleme
+dosya = st.file_uploader("Test Edilecek PDF'i Yükleyin", type="pdf")
 
 if dosya:
+    # Her dosya yüklemesinde analizi tazelet
     if "analiz_sonucu" not in st.session_state or st.session_state.dosya_adi != dosya.name:
-        text = pdf_oku(dosya)
-        st.session_state.analiz_sonucu = analiz_yap(text, dosya.name)
-        st.session_state.dosya_adi = dosya.name
+        with st.spinner("Yapay zeka analiz ediyor..."):
+            text = pdf_oku(dosya)
+            st.session_state.analiz_sonucu = analiz_yap(text, dosya.name)
+            st.session_state.dosya_adi = dosya.name
     
     veri = st.session_state.analiz_sonucu
 
-    # --- DÜZENLEME FORMU ---
-    # Özet kartları kaldırdık, direkt forma geçiyoruz.
-    st.write("") 
-    st.subheader("📝 Bilgileri Doğrula")
+    # --- ANALİZ SONUCU FORMU ---
+    st.write("")
+    st.subheader("🔍 Analiz Sonuçları")
     
-    with st.form("kayit_formu"):
+    # Form kullanıyoruz ki düzenleme yapabilesin (ama kaydetme butonu sadece Excel indirir)
+    with st.form("analiz_formu"):
         
-        # 1. SATIR: Dosya Bilgileri
-        st.write("###### 🗂 Dosya Bilgileri")
+        # 1. SATIR
+        st.write("###### 🗂 Dosya Kimliği")
         c1, c2, c3, c4 = st.columns(4)
         
         turler = ["⚖️ ÖZEL HUKUK", "🛑 CEZA HUKUKU", "⚡ İCRA HUKUKU", "🏛️ İDARE HUKUKU"]
         secili_idx = 0
         if veri["Dava Türü"] in turler: secili_idx = turler.index(veri["Dava Türü"])
         
-        y_tur = c1.selectbox("Hukuk Türü", turler, index=secili_idx)
+        y_tur = c1.selectbox("Tür", turler, index=secili_idx)
         y_mahkeme = c2.text_input("Mahkeme", veri["Mahkeme"])
         y_esas = c3.text_input("Esas No", veri["Esas No"])
         y_karar = c4.text_input("Karar No", veri["Karar No"])
         
-        # 2. SATIR: Dava Konusu ve Tarihler
-        c_konu, c_tar1, c_tar2 = st.columns([2, 1, 1])
+        # 2. SATIR
+        c_konu, c_t1, c_t2 = st.columns([2, 1, 1])
         y_konu = c_konu.text_input("Dava Konusu", veri["Dava Konusu"]) 
-        y_dava_t = c_tar1.text_input("Dava Tarihi", veri["Dava Tarihi"])
-        y_karar_t = c_tar2.text_input("Karar Tarihi", veri["Karar Tarihi"])
+        y_dava_t = c_t1.text_input("Dava Tarihi", veri["Dava Tarihi"])
+        y_karar_t = c_t2.text_input("Karar Tarihi", veri["Karar Tarihi"])
 
-        # 3. SATIR: Taraflar
+        # 3. SATIR
         st.markdown("---")
         st.write("###### 👥 Taraflar")
         c4, c5 = st.columns(2)
@@ -160,8 +149,9 @@ if dosya:
         y_davali = c6.text_input("Davalı", veri["Davalı"])
         y_davali_vekil = c7.text_input("Davalı Vekili", veri["Davalı Vekili"])
         
-        # 4. SATIR: Mali Detaylar
+        # 4. SATIR
         st.markdown("---")
+        st.write("###### 💰 Mali Detaylar")
         m_c0, m_c1, m_c2, m_c3 = st.columns(4)
         y_sonuc = m_c0.selectbox("Sonuç", ["✅ KABUL", "❌ RED", "⚠️ KISMEN KABUL", "❓ Belirsiz"], index=0)
         y_vekalet = m_c1.text_input("Vekalet", veri["Vekalet Ücreti"])
@@ -169,16 +159,31 @@ if dosya:
         y_harc = m_c3.text_input("Harç", veri["Harç"])
 
         st.markdown("---")
-        if st.form_submit_button("✅ VERİLERİ KAYDET", use_container_width=True):
-            kayit = {
-                "Dosya Adı": veri["Dosya Adı"], "Dava Türü": y_tur,
-                "Mahkeme": y_mahkeme, "Esas No": y_esas, "Karar No": y_karar, "Dava Konusu": y_konu,
-                "Davacı": y_davaci, "Davacı Vekili": y_d_vekil, 
-                "Davalı": y_davali, "Davalı Vekili": y_davali_vekil,
-                "Dava Tarihi": y_dava_t, "Karar Tarihi": y_karar_t,
-                "Sonuç": y_sonuc, "Vekalet Ücreti": y_vekalet, 
-                "Yargılama Gideri": y_gider, "Harç": y_harc
-            }
-            veritabanina_kaydet(kayit)
-            st.success("Dosya eksiksiz şekilde arşivlendi.")
-            st.rerun()
+        
+        # Bu buton sadece formu tetikler, asıl işlem aşağıda
+        submitted = st.form_submit_button("Analizi Güncelle")
+
+    # --- TEK SEFERLİK EXCEL İNDİRME (OPTIONAL) ---
+    # Eğer o anki veriyi almak istersen diye koydum, veritabanı değil, tek dosya çıktısı.
+    
+    # Güncel verileri topla
+    guncel_veri = {
+        "Dosya": veri["Dosya Adı"], "Tür": y_tur, "Mahkeme": y_mahkeme,
+        "Esas": y_esas, "Karar": y_karar, "Konu": y_konu,
+        "Davacı": y_davaci, "Davalı": y_davali, "Sonuç": y_sonuc,
+        "Vekalet": y_vekalet, "Gider": y_gider
+    }
+    
+    df_single = pd.DataFrame([guncel_veri])
+    
+    # Excel İndir Butonu (Form dışında)
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+        df_single.to_excel(writer, index=False, sheet_name='Analiz')
+        
+    st.download_button(
+        label="📥 Bu Analizi Excel Olarak İndir",
+        data=buffer.getvalue(),
+        file_name=f"Analiz_{y_esas.replace('/', '-')}.xlsx",
+        mime="application/vnd.ms-excel"
+    )
