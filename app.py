@@ -7,54 +7,7 @@ import io
 # --- 1. AYARLAR ---
 st.set_page_config(page_title="Hukuk Asistanı", layout="wide", page_icon="⚖️")
 
-# --- 2. CSS TASARIMI (BEYAZ TEMA KİLİDİ) ---
-st.markdown("""
-<style>
-    /* 1. Ana Arkaplanı Bembeyaz Yap */
-    .stApp {
-        background-color: #ffffff;
-        color: #31333F; /* Koyu Gri Yazı (Okunaklı) */
-    }
-    
-    /* 2. Yan Menü (Sidebar) Açık Gri Olsun */
-    [data-testid="stSidebar"] {
-        background-color: #f8f9fa;
-        border-right: 1px solid #dee2e6;
-    }
-
-    /* 3. Form Kutularının İçini Beyaz Yap ve Çerçeve Ekle */
-    div[data-testid="stForm"] {
-        background-color: #ffffff;
-        padding: 25px;
-        border-radius: 12px;
-        border: 2px solid #e9ecef;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.02);
-    }
-    
-    /* 4. Başlıkları Koyu Lacivert Yap (Profesyonel Dursun) */
-    h1, h2, h3 {
-        color: #2c3e50 !important;
-    }
-    
-    /* 5. Yazı Giriş Kutularını (Input) Belirginleştir */
-    .stTextInput input, .stSelectbox div[data-baseweb="select"] {
-        background-color: #fdfdfd;
-        color: #333;
-        border-color: #ced4da;
-    }
-    
-    /* 6. Metrik Kutularını Düzenle */
-    div[data-testid="stMetric"] {
-        background-color: #f8f9fa;
-        padding: 15px;
-        border-radius: 8px;
-        border: 1px solid #e9ecef;
-        text-align: center;
-    }
-</style>
-""", unsafe_allow_html=True)
-
-# --- 3. FONKSİYONLAR ---
+# --- 2. FONKSİYONLAR ---
 
 def metni_temizle(metin):
     temiz = metin.replace("\n", " ").strip()
@@ -131,85 +84,74 @@ def analiz_yap(metin, dosya_adi):
     bilgi["Harç"] = para_bul(alan, ["bakiye", "karar harcı", "eksik kalan"])
     return bilgi
 
-# --- 4. ARAYÜZ ---
+# --- 3. ARAYÜZ ---
 
 st.title("⚖️ Hukuk Asistanı")
 st.markdown("---")
 
 # Dosya Yükleme
-dosya = st.file_uploader("Analiz Edilecek PDF Dosyasını Buraya Bırakın", type="pdf")
+dosya = st.file_uploader("Analiz Edilecek PDF Dosyasını Yükleyin", type="pdf")
 
 if dosya:
     if "analiz_sonucu" not in st.session_state or st.session_state.dosya_adi != dosya.name:
-        with st.spinner("Dosya okunuyor, lütfen bekleyin..."):
+        with st.spinner("Dosya okunuyor..."):
             text = pdf_oku(dosya)
             st.session_state.analiz_sonucu = analiz_yap(text, dosya.name)
             st.session_state.dosya_adi = dosya.name
     
     veri = st.session_state.analiz_sonucu
 
-    # --- ÖZET METRİKLER (Beyaz Temada Şık Görünür) ---
-    c_m1, c_m2, c_m3, c_m4 = st.columns(4)
-    c_m1.metric("Sonuç", veri["Sonuç"])
-    c_m2.metric("Vekalet", veri["Vekalet Ücreti"])
-    c_m3.metric("Giderler", veri["Yargılama Gideri"])
-    c_m4.metric("Harç", veri["Harç"])
-
-    st.write("") 
-    
-    # --- FORM ---
+    # --- DETAYLI BİLGİ ALANLARI (FORM OLMADAN) ---
     st.subheader("📝 Analiz Detayları")
     
-    with st.form("analiz_formu"):
-        
-        # 1. SATIR: Kimlik
-        st.write("###### 🗂 Dosya Kimliği")
-        c1, c2, c3, c4 = st.columns(4)
-        
-        turler = ["⚖️ ÖZEL HUKUK", "🛑 CEZA HUKUKU", "⚡ İCRA HUKUKU", "🏛️ İDARE HUKUKU"]
-        secili_idx = 0
-        if veri["Dava Türü"] in turler: secili_idx = turler.index(veri["Dava Türü"])
-        
-        y_tur = c1.selectbox("Tür", turler, index=secili_idx)
-        y_mahkeme = c2.text_input("Mahkeme", veri["Mahkeme"])
-        y_esas = c3.text_input("Esas No", veri["Esas No"])
-        y_karar = c4.text_input("Karar No", veri["Karar No"])
-        
-        # 2. SATIR: Konu
-        c_konu, c_t1, c_t2 = st.columns([2, 1, 1])
-        y_konu = c_konu.text_input("Dava Konusu", veri["Dava Konusu"]) 
-        y_dava_t = c_t1.text_input("Dava Tarihi", veri["Dava Tarihi"])
-        y_karar_t = c_t2.text_input("Karar Tarihi", veri["Karar Tarihi"])
+    # 1. SATIR
+    st.write("###### 🗂 Dosya Kimliği")
+    c1, c2, c3, c4 = st.columns(4)
+    
+    turler = ["⚖️ ÖZEL HUKUK", "🛑 CEZA HUKUKU", "⚡ İCRA HUKUKU", "🏛️ İDARE HUKUKU"]
+    secili_idx = 0
+    if veri["Dava Türü"] in turler: secili_idx = turler.index(veri["Dava Türü"])
+    
+    y_tur = c1.selectbox("Tür", turler, index=secili_idx)
+    y_mahkeme = c2.text_input("Mahkeme", veri["Mahkeme"])
+    y_esas = c3.text_input("Esas No", veri["Esas No"])
+    y_karar = c4.text_input("Karar No", veri["Karar No"])
+    
+    # 2. SATIR
+    c_konu, c_t1, c_t2 = st.columns([2, 1, 1])
+    y_konu = c_konu.text_input("Dava Konusu", veri["Dava Konusu"]) 
+    y_dava_t = c_t1.text_input("Dava Tarihi", veri["Dava Tarihi"])
+    y_karar_t = c_t2.text_input("Karar Tarihi", veri["Karar Tarihi"])
 
-        # 3. SATIR: Taraflar
-        st.markdown("---")
-        st.write("###### 👥 Taraflar")
-        c4, c5 = st.columns(2)
-        y_davaci = c4.text_input("Davacı", veri["Davacı"])
-        y_d_vekil = c5.text_input("Davacı Vekili", veri["Davacı Vekili"])
-        
-        c6, c7 = st.columns(2)
-        y_davali = c6.text_input("Davalı", veri["Davalı"])
-        y_davali_vekil = c7.text_input("Davalı Vekili", veri["Davalı Vekili"])
-        
-        # 4. SATIR: Mali
-        st.markdown("---")
-        st.write("###### 💰 Mali Detaylar")
-        m_c0, m_c1, m_c2, m_c3 = st.columns(4)
-        y_sonuc = m_c0.selectbox("Sonuç", ["✅ KABUL", "❌ RED", "⚠️ KISMEN KABUL", "❓ Belirsiz"], index=0)
-        y_vekalet = m_c1.text_input("Vekalet", veri["Vekalet Ücreti"])
-        y_gider = m_c2.text_input("Gider", veri["Yargılama Gideri"])
-        y_harc = m_c3.text_input("Harç", veri["Harç"])
+    # 3. SATIR
+    st.markdown("---")
+    st.write("###### 👥 Taraflar")
+    c4, c5 = st.columns(2)
+    y_davaci = c4.text_input("Davacı", veri["Davacı"])
+    y_d_vekil = c5.text_input("Davacı Vekili", veri["Davacı Vekili"])
+    
+    c6, c7 = st.columns(2)
+    y_davali = c6.text_input("Davalı", veri["Davalı"])
+    y_davali_vekil = c7.text_input("Davalı Vekili", veri["Davalı Vekili"])
+    
+    # 4. SATIR
+    st.markdown("---")
+    st.write("###### 💰 Mali Detaylar")
+    m_c0, m_c1, m_c2, m_c3 = st.columns(4)
+    y_sonuc = m_c0.selectbox("Sonuç", ["✅ KABUL", "❌ RED", "⚠️ KISMEN KABUL", "❓ Belirsiz"], index=0)
+    y_vekalet = m_c1.text_input("Vekalet", veri["Vekalet Ücreti"])
+    y_gider = m_c2.text_input("Gider", veri["Yargılama Gideri"])
+    y_harc = m_c3.text_input("Harç", veri["Harç"])
 
-        st.markdown("---")
-        submitted = st.form_submit_button("Analizi Güncelle")
+    st.markdown("---")
 
     # --- EXCEL İNDİRME ---
+    # Bu veriler artık senin o an ekrana yazdığın güncel verilerdir.
     guncel_veri = {
         "Dosya": veri["Dosya Adı"], "Tür": y_tur, "Mahkeme": y_mahkeme,
         "Esas": y_esas, "Karar": y_karar, "Konu": y_konu,
         "Davacı": y_davaci, "Davalı": y_davali, "Sonuç": y_sonuc,
-        "Vekalet": y_vekalet, "Gider": y_gider
+        "Vekalet": y_vekalet, "Gider": y_gider, "Harç": y_harc
     }
     
     df_single = pd.DataFrame([guncel_veri])
@@ -221,5 +163,6 @@ if dosya:
         label="📥 Bu Analizi Excel Olarak İndir",
         data=buffer.getvalue(),
         file_name=f"Analiz_{y_esas.replace('/', '-')}.xlsx",
-        mime="application/vnd.ms-excel"
+        mime="application/vnd.ms-excel",
+        type="primary"
     )
