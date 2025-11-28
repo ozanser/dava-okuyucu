@@ -2,146 +2,165 @@ import streamlit as st
 import PyPDF2
 import re
 import pandas as pd
-from collections import Counter
 
 # --- SAYFA AYARLARI ---
-st.set_page_config(page_title="Hukuk Bürosu Paneli", layout="wide", page_icon="⚖️")
+st.set_page_config(page_title="Gerekçeli Karar Analizcisi", layout="wide", page_icon="⚖️")
 
-# --- FONKSİYONLAR ---
+# --- OCR DÜZELTME MOTORU ---
+def metni_temizle_ve_duzelt(metin):
+    """
+    PDF'ten gelen bozuk Türkçe karakterleri ve OCR hatalarını onarır.
+    Örn: 'HAK M' -> 'HAKİM', 'T RAZ' -> 'İTİRAZ'
+    """
+    duzeltmeler = {
+        r"HAK M": "HAKİM",
+        r"KAT P": "KATİP",
+        r"VEK L": "VEKİL",
+        r"M LLET": "MİLLET",
+        r"T RAZ": "İTİRAZ",
+        r"PTAL": "İPTAL",
+        r"TAHL YE": "TAHLİYE",
+        r"GEREKÇEL KARAR": "GEREKÇELİ KARAR",
+        r"DAVACI": "DAVACI",
+        r"DAVALI": "DAVALI",
+        r"HÜKÜM": "HÜKÜM",
+        r"GERE DÜ ÜNÜLDÜ": "GEREĞİ DÜŞÜNÜLDÜ",
+        r"ba latılan": "başlatılan",
+        r"anla ılmakla": "anlaşılmakla"
+    }
+    
+    # Önce genel boşlukları temizle
+    temiz_metin = metin.replace("\n", " ").strip()
+    
+    # Regex ile kelime düzeltmeleri yap
+    for bozuk, duzgun in duzeltmeler.items():
+        temiz_metin = re.sub(bozuk, duzgun, temiz_metin, flags=re.IGNORECASE)
+        
+    return temiz_metin
 
+# --- PDF OKUMA ---
 def pdf_metin_oku(dosya):
-    """PDF'ten metni çeker."""
     okuyucu = PyPDF2.PdfReader(dosya)
     metin = ""
-    # Sadece ilk 5 sayfayı okumak hız kazandırır ve genelde yeterlidir
-    for sayfa in okuyucu.pages[:5]:
+    for sayfa in okuyucu.pages:
         metin += sayfa.extract_text() or ""
     return metin
 
-def mahkeme_bul(metin):
-    """Metnin başındaki T.C. ... MAHKEMESİ ibaresini arar."""
-    kalip = r"(T\.?C\.?.*?MAHKEMESİ)"
-    bulunan = re.search(kalip, metin, re.IGNORECASE | re.DOTALL)
-    if bulunan:
-        return bulunan.group(1).replace("\n", " ").strip()
-    return "Mahkeme Belirtilmemiş"
+# --- ANALİZ MOTORU ---
+def detayli_analiz(ham_metin, dosya_adi):
+    # 1. Önce metni tamir et
+    metin = metni_temizle_ve_duzelt(ham_metin)
+    
+    bilgiler = {"Dosya Adı": dosya_adi}
+    
+    # --- REGEX TANIMLARI (Senin dosya formatına özel) ---
+    regex_listesi = {
+        "Mahkeme": r"(T\.?C\.?.*?MAHKEMES.*?)Esas",
+        "Esas No": r"ESAS\s*NO\s*[:;]?\s*['\"]?,?[:]?\s*(\d{4}/\d+)",
+        "Karar No": r"KARAR\s*NO\s*[:;]?\s*['\"]?,?[:]?\s*(\d{4}/\d+)",
+        "Hakim": r"HAKİM\s*[:;]?\s*['\"]?,?[:]?\s*(.*?)(?=\d|KATİP)",
+        "Davacı": r"DAVACI\s*.*?[:;]\s*(.*?)(?=VEKİL|DAVALI)",
+        "Davalı": r"DAVALI\s*.*?[:;]\s*(.*?)(?=VEKİL|DAVA|KONU)",
+        "Dava Türü": r"DAVA\s*[:;]\s*(.*?)(?=DAVA TARİHİ)",
+        "Dava Tarihi": r"DAVA TARİHİ\s*['\"]?,?[:]?\s*(\d{1,2}/\d{1,2}/\d{4})",
+        "Karar Tarihi": r"KARAR TARİHİ\s*['\"]?,?[:]?\s*(\d{1,2}/\d{1,2}/\d{4})",
+    }
+    
+    for baslik, kalip in regex_listesi.items():
+        bulunan = re.search(kalip, metin, re.IGNORECASE)
+        if bulunan:
+            # Gereksiz karakterleri temizle (tırnak, virgül vb.)
+            temiz_veri = bulunan.group(1).replace('"', '').replace(',', '').strip()
+            bilgiler[baslik] = temiz_veri
+        else:
+            bilgiler[baslik] = "-"
 
-def konu_tahmin_et(metin):
-    """Dava türünü tahmin eder."""
-    metin_lower = metin.lower()
+    # --- HÜKÜM / SONUÇ BULMA (En Kritik Yer) ---
+    # Hüküm genellikle "HÜKÜM:" kelimesinden sonra gelir ve maddeler halindedir.
+    hukum_kalibi = r"HÜKÜM\s*[:;].*?(\d-.*?)(?=UYAP|GEREKÇELİ KARAR YAZILDIĞI TARİH|$)"
+    hukum_bul = re.search(hukum_kalibi, metin, re.IGNORECASE)
     
-    kategoriler = {
-        "Boşanma / Aile": ["boşanma", "velayet", "nafaka", "ziynet", "aile mahkemesi"],
-        "İş / Alacak": ["kıdem", "ihbar", "işe iade", "fazla mesai", "sgk", "iş mahkemesi"],
-        "Ceza Dosyası": ["sanık", "suç", "ceza", "hapis", "beraat", "ağır ceza", "asliye ceza"],
-        "Gayrimenkul": ["tapu", "tahliye", "kira", "ecrimisil", "kadastro"],
-        "İcra / Borç": ["icra", "alacak", "borç", "haciz", "taahhüt"]
-    }
-    
-    skorlar = {}
-    for kategori, kelimeler in kategoriler.items():
-        skor = 0
-        for kelime in kelimeler:
-            skor += metin_lower.count(kelime)
-        skorlar[kategori] = skor
-    
-    en_yuksek = max(skorlar, key=skorlar.get)
-    return en_yuksek if skorlar[en_yuksek] > 0 else "Genel / Belirsiz"
+    if hukum_bul:
+        bilgiler["Detaylı Hüküm"] = hukum_bul.group(1).strip()
+    else:
+        # Eğer HÜKÜM bloğu bulunamazsa son sayfalara bak
+        bilgiler["Detaylı Hüküm"] = "Hüküm bloğu net ayrıştırılamadı."
 
-def detayli_analiz(metin, dosya_adi):
-    """Tek bir dosya için tüm analizleri yapar."""
-    bilgiler = {
-        "Dosya Adı": dosya_adi,
-        "Mahkeme": mahkeme_bul(metin),
-        "Dava Türü": konu_tahmin_et(metin)
-    }
-    
-    aramalar = {
-        "Esas No": r"ESAS\s*NO\s*[:;]?\s*(\d{4}/\d+)",
-        "Karar No": r"KARAR\s*NO\s*[:;]?\s*(\d{4}/\d+)",
-        "Tarih": r"(\d{1,2}[./]\d{1,2}[./]\d{4})",
-        "Davacı": r"DAVACI\s*[:;]\s*(.*?)(?=\n)",
-        "Davalı": r"DAVALI\s*[:;]\s*(.*?)(?=\n)"
-    }
-    
-    for baslik, kalip in aramalar.items():
-        bulunan = re.search(kalip, metin, re.IGNORECASE | re.DOTALL)
-        deger = bulunan.group(1).strip()[:100] if bulunan else "-"
-        bilgiler[baslik] = deger.replace("\n", " ")
-        
+    # --- KISA SONUÇ ÇIKARIMI (Kazanıldı mı?) ---
+    # Metin içinde "DAVANIN KABULÜNE" veya "REDDİNE" geçiyor mu?
+    if "DAVANIN KABULÜNE" in metin.upper():
+        bilgiler["Sonuç Özeti"] = "✅ KABUL (Davacı Kazandı)"
+    elif "DAVANIN REDDİNE" in metin.upper():
+        bilgiler["Sonuç Özeti"] = "❌ RED (Davacı Kaybetti)"
+    elif "KISMEN KABUL" in metin.upper():
+        bilgiler["Sonuç Özeti"] = "⚠️ KISMEN KABUL"
+    else:
+        bilgiler["Sonuç Özeti"] = "Belirsiz"
+
     return bilgiler
 
-# --- ARAYÜZ TASARIMI ---
+# --- ARAYÜZ ---
+st.title("⚖️ Gerekçeli Karar Okuyucu")
+st.markdown("**Desteklenen Format:** Uyap Mahkeme Kararları ve Dava Dilekçeleri")
 
-st.title("⚖️ Toplu Dava Yönetim Paneli")
-st.markdown("Birden fazla dava dosyasını (PDF) aynı anda yükleyin, sistem hepsini tek tabloda özetlesin.")
-
-# ÇOKLU DOSYA YÜKLEME (accept_multiple_files=True)
-uploaded_files = st.file_uploader("Dosyaları Sürükleyip Bırakın (Çoklu Seçim Yapabilirsiniz)", 
-                                  type="pdf", 
-                                  accept_multiple_files=True)
+# Çoklu Dosya Yükleme
+uploaded_files = st.file_uploader("Dosyaları Sürükleyin (PDF)", type="pdf", accept_multiple_files=True)
 
 if uploaded_files:
     tum_veriler = []
     
-    # İlerleme Çubuğu (Bar)
-    bar = st.progress(0)
-    toplam_dosya = len(uploaded_files)
+    for dosya in uploaded_files:
+        raw_text = pdf_metin_oku(dosya)
+        if len(raw_text) > 50:
+            analiz_sonucu = detayli_analiz(raw_text, dosya.name)
+            tum_veriler.append(analiz_sonucu)
     
-    for i, dosya in enumerate(uploaded_files):
-        # Her dosyayı sırayla işle
-        metin = pdf_metin_oku(dosya)
-        if len(metin) > 50:
-            veri = detayli_analiz(metin, dosya.name)
-            tum_veriler.append(veri)
+    if tum_veriler:
+        df = pd.DataFrame(tum_veriler)
         
-        # İlerleme çubuğunu güncelle
-        bar.progress((i + 1) / toplam_dosya)
-    
-    # Verileri Tabloya (DataFrame) Dönüştür
-    df = pd.DataFrame(tum_veriler)
-    
-    if not df.empty:
-        # --- İSTATİSTİK PANELİ (Üst Kısım) ---
+        # --- ÜST ÖZET KARTLARI ---
         st.write("---")
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Toplam Dosya", len(df))
-        col2.metric("En Çok Görülen Dava", df["Dava Türü"].mode()[0] if not df.empty else "-")
-        col3.metric("Tespit Edilen Mahkemeler", df["Mahkeme"].nunique())
-
-        # --- GRAFİKSEL GÖSTERİM ---
-        # Sol tarafta Dava Türü Dağılımı
-        col_grafik1, col_grafik2 = st.columns([1, 2])
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Yüklenen Dosya", len(df))
+        c2.metric("Kabul Kararı", len(df[df["Sonuç Özeti"].str.contains("KABUL")]))
+        c3.metric("Red Kararı", len(df[df["Sonuç Özeti"].str.contains("RED")]))
         
-        with col_grafik1:
-            st.subheader("Dava Türü Dağılımı")
-            tur_sayilari = df["Dava Türü"].value_counts()
-            st.bar_chart(tur_sayilari)
-
-        with col_grafik2:
-            st.subheader("📄 Detaylı Dosya Listesi")
-            st.dataframe(df) # İnteraktif tablo
+        # --- TABLO GÖRÜNÜMÜ ---
+        st.subheader("📄 Dosya Listesi")
+        # Önemli kolonları öne alalım
+        ozet_tablo = df[["Dosya Adı", "Mahkeme", "Esas No", "Karar No", "Sonuç Özeti", "Davacı", "Davalı"]]
+        st.dataframe(ozet_tablo, use_container_width=True)
+        
+        # --- SEÇİLEN DOSYANIN DETAYI ---
+        st.write("---")
+        secilen_dosya = st.selectbox("Detayını görmek istediğiniz dosyayı seçin:", df["Dosya Adı"].tolist())
+        
+        if secilen_dosya:
+            # Seçilen satırı bul
+            detay = df[df["Dosya Adı"] == secilen_dosya].iloc[0]
             
-        # --- EXCEL İNDİRME ---
+            col_sol, col_sag = st.columns(2)
+            
+            with col_sol:
+                st.info(f"**Mahkeme:** {detay['Mahkeme']}")
+                st.write(f"**Hakim:** {detay['Hakim']}")
+                st.write(f"**Dava:** {detay['Dava Türü']}")
+                st.error(f"**SONUÇ:** {detay['Sonuç Özeti']}")
+            
+            with col_sag:
+                st.text_input("Esas No", value=detay['Esas No'])
+                st.text_input("Karar No", value=detay['Karar No'])
+                st.text_input("Davacı", value=detay['Davacı'])
+                st.text_input("Davalı", value=detay['Davalı'])
+            
+            # Uzun Hüküm Metni
+            with st.expander("📝 Mahkemenin Verdiği Tam Karar Metni (Hüküm)"):
+                st.warning(detay['Detaylı Hüküm'])
+
+        # --- EXCEL İNDİR ---
         st.write("---")
         csv = df.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="📥 Tüm Listeyi Excel (CSV) Olarak İndir",
-            data=csv,
-            file_name='dava_listesi_ozeti.csv',
-            mime='text/csv',
-            use_container_width=True
-        )
-    else:
-        st.error("Yüklenen dosyalardan metin okunamadı.")
+        st.download_button("📥 Tüm Listeyi Excel Olarak İndir", csv, "karar_listesi.csv", "text/csv")
         
-else:
-    st.info("👆 Başlamak için yukarıya bir veya daha fazla PDF dosyası bırakın.")
-
-# --- SIDEBAR BİLGİ ---
-with st.sidebar:
-    st.header("Nasıl Kullanılır?")
-    st.write("1. Bilgisayarınızdaki dava klasörüne gidin.")
-    st.write("2. İstediğiniz kadar PDF'i seçin.")
-    st.write("3. Hepsini buraya sürükleyin.")
-    st.success("Sistem otomatik olarak:\n* Mahkemeyi\n* Konuyu\n* Tarafları\nayıklar ve listeler.")
+    else:
+        st.error("Dosyalardan metin okunamadı.")
