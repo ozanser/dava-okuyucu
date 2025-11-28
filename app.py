@@ -74,4 +74,99 @@ def analiz_yap(metin, dosya_adi):
         "Esas No": r"ESAS\s*NO\s*[:;]?\s*['\"]?,?[:]?\s*(\d{4}/\d+)",
         "Karar No": r"KARAR\s*NO\s*[:;]?\s*['\"]?,?[:]?\s*(\d{4}/\d+)",
         "Davacı": r"DAVACI\s*.*?[:;]\s*(.*?)(?=VEKİL|DAVALI)",
-        "Davalı":
+        "Davalı": r"DAVALI\s*.*?[:;]\s*(.*?)(?=VEKİL|DAVA|KONU)"
+    }
+    for k, v in patterns.items():
+        m = re.search(v, metin, re.IGNORECASE)
+        bilgi[k] = m.group(1).strip() if m else "-"
+        
+    # Sonuç Analizi
+    if "KABUL" in metin.upper(): bilgi["Sonuç"] = "KABUL"
+    elif "RED" in metin.upper(): bilgi["Sonuç"] = "RED"
+    else: bilgi["Sonuç"] = "Belirsiz"
+    
+    bilgi["Vekalet Ücreti"] = para_bul(metin, "vekalet ücreti")
+    return bilgi
+
+# --- 4. ARAYÜZ ---
+
+st.title("🧠 Öğrenen Hukuk Asistanı")
+st.markdown("Yapay zeka analizini kontrol edin, **hatalı kısımları (özellikle Esas/Karar No)** düzeltip kaydedin.")
+
+# Yan Menü: Veritabanı Durumu
+with st.sidebar:
+    st.header("💾 Arşiv Durumu")
+    df_db = veritabani_yukle()
+    st.metric("Kaydedilen Dosya", len(df_db))
+    if not df_db.empty:
+        st.write("Son Eklenenler:")
+        st.dataframe(df_db[["Esas No", "Sonuç"]].tail(5), hide_index=True)
+        st.download_button("📂 Arşivi İndir (Excel)", df_db.to_csv(index=False).encode('utf-8'), "dava_arsivi.csv")
+
+# Dosya Yükleme
+uploaded_file = st.file_uploader("Karar Dosyası (PDF)", type="pdf")
+
+if uploaded_file:
+    # Session state ile analizi hafızada tut (sayfa yenilenince gitmesin)
+    if "analiz_sonucu" not in st.session_state or st.session_state.dosya_adi != uploaded_file.name:
+        text = pdf_oku(uploaded_file)
+        st.session_state.analiz_sonucu = analiz_yap(text, uploaded_file.name)
+        st.session_state.dosya_adi = uploaded_file.name
+    
+    veri = st.session_state.analiz_sonucu
+
+    # --- DÜZENLEME FORMU (Burayı Geliştirdik) ---
+    st.subheader("📝 Analiz ve Doğrulama Paneli")
+    st.info("Aşağıdaki kutucuklardaki bilgiler PDF'ten otomatik çekildi. Hata varsa üzerine tıklayıp düzeltebilirsiniz.")
+    
+    with st.form("dogrulama_formu"):
+        st.write("#### 1. Dosya Kimlik Bilgileri")
+        # Mahkeme tek satır
+        yeni_mahkeme = st.text_input("Mahkeme Adı", value=veri["Mahkeme"])
+        
+        # Esas ve Karar No Yan Yana (İsteğin üzerine eklendi)
+        c1, c2 = st.columns(2)
+        yeni_esas = c1.text_input("Esas No (Örn: 2024/1048)", value=veri["Esas No"])
+        yeni_karar = c2.text_input("Karar No (Örn: 2025/1155)", value=veri["Karar No"])
+        
+        st.write("---")
+        st.write("#### 2. Taraflar ve Sonuç")
+        
+        c3, c4 = st.columns(2)
+        yeni_davaci = c3.text_input("Davacı", value=veri["Davacı"])
+        yeni_davali = c4.text_input("Davalı", value=veri["Davalı"])
+        
+        c5, c6 = st.columns(2)
+        # Sonuç Seçim Kutusu
+        secenekler = ["KABUL", "RED", "KISMEN KABUL", "Belirsiz"]
+        varsayilan_index = 0
+        if veri["Sonuç"] in secenekler:
+            varsayilan_index = secenekler.index(veri["Sonuç"])
+            
+        yeni_sonuc = c5.selectbox("Karar Sonucu", secenekler, index=varsayilan_index)
+        yeni_vekalet = c6.text_input("Vekalet Ücreti", value=veri["Vekalet Ücreti"])
+        
+        st.write("---")
+        # Kaydet Butonu
+        kaydet_butonu = st.form_submit_button("✅ Onayla ve Veritabanına Kaydet")
+        
+        if kaydet_butonu:
+            # Kullanıcının son haliyle verileri paketle
+            kaydedilecek_veri = {
+                "Dosya Adı": veri["Dosya Adı"],
+                "Mahkeme": yeni_mahkeme,
+                "Esas No": yeni_esas,   # Artık düzenlenmiş hali gidiyor
+                "Karar No": yeni_karar, # Artık düzenlenmiş hali gidiyor
+                "Davacı": yeni_davaci,
+                "Davalı": yeni_davali,
+                "Sonuç": yeni_sonuc,
+                "Vekalet Ücreti": yeni_vekalet
+            }
+            
+            # Veritabanına Yaz
+            veritabanina_kaydet(kaydedilecek_veri)
+            st.success(f"Dosya ({yeni_esas}) başarıyla arşive eklendi!")
+            
+            # Güncel tabloyu hemen göster
+            st.write("### 📂 Güncel Veritabanı")
+            st.dataframe(veritabani_yukle().tail(3))
