@@ -51,7 +51,6 @@ def para_bul(metin, anahtar_kelime_grubu):
     return "0,00 TL"
 
 def dava_turu_belirle(mahkeme_adi, metin):
-    """Mahkeme adına ve içeriğe bakarak dava türünü tahmin eder."""
     mahkeme_lower = mahkeme_adi.lower()
     metin_lower = metin.lower()
     
@@ -60,7 +59,6 @@ def dava_turu_belirle(mahkeme_adi, metin):
     if "idare" in mahkeme_lower or "vergi" in mahkeme_lower: return "🏛️ İDARE HUKUKU"
     if "sulh hukuk" in mahkeme_lower or "asliye hukuk" in mahkeme_lower or "aile" in mahkeme_lower or "iş" in mahkeme_lower: return "⚖️ ÖZEL HUKUK"
     
-    # İçerik kontrolü
     if "sanık" in metin_lower or "suç" in metin_lower or "beraat" in metin_lower: return "🛑 CEZA HUKUKU"
     if "yürütmenin durdurulması" in metin_lower or "iptali" in metin_lower: return "🏛️ İDARE HUKUKU"
     if "ödeme emri" in metin_lower or "takip" in metin_lower: return "⚡ İCRA HUKUKU"
@@ -71,7 +69,6 @@ def analiz_yap(metin, dosya_adi):
     metin = metni_temizle(metin)
     bilgi = {"Dosya Adı": dosya_adi}
     
-    # Künye Regex
     regexler = {
         "Mahkeme": r"(T\.?C\.?.*?MAHKEMES.*?)Esas",
         "Esas No": r"ESAS\s*NO\s*[:;]?\s*['\"]?,?[:]?\s*(\d{4}/\d+)",
@@ -87,23 +84,16 @@ def analiz_yap(metin, dosya_adi):
     
     for k, v in regexler.items():
         m = re.search(v, metin, re.IGNORECASE)
-        if m:
-            raw_val = m.group(1).strip().replace(":", "")
-            bilgi[k] = raw_val
-        else:
-            bilgi[k] = "" 
+        bilgi[k] = m.group(1).strip().replace(":", "") if m else ""
 
-    # Tür Belirle
     bilgi["Dava Türü"] = dava_turu_belirle(bilgi["Mahkeme"], metin)
 
-    # Sonuç
     alan = metin.upper()[-3000:]
     if "KISMEN KABUL" in alan: bilgi["Sonuç"] = "⚠️ KISMEN KABUL"
     elif re.search(r"DAVANIN\s*KABUL", alan) or re.search(r"İTİRAZIN\s*İPTAL", alan): bilgi["Sonuç"] = "✅ KABUL"
     elif re.search(r"DAVANIN\s*RED", alan): bilgi["Sonuç"] = "❌ RED"
     else: bilgi["Sonuç"] = "❓ Belirsiz"
 
-    # Mali
     bilgi["Vekalet Ücreti"] = para_bul(alan, ["vekalet ücreti", "ücreti vekalet"])
     bilgi["Yargılama Gideri"] = para_bul(alan, ["toplam yargılama gideri", "yapılan masraf", "yargılama giderinin"])
     bilgi["Harç"] = para_bul(alan, ["bakiye", "karar harcı", "eksik kalan"])
@@ -133,30 +123,22 @@ if dosya:
     
     veri = st.session_state.analiz_sonucu
 
-    # Özet Kartlar
-    st.divider()
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Hukuk Türü", veri["Dava Türü"])
-    m2.metric("Sonuç", veri["Sonuç"])
-    m3.metric("Vekalet", veri["Vekalet Ücreti"])
-    m4.metric("Giderler", veri["Yargılama Gideri"])
-    st.divider()
-
     # --- DÜZENLEME FORMU ---
+    # Özet kartları kaldırdık, direkt forma geçiyoruz.
+    st.write("") 
     st.subheader("📝 Bilgileri Doğrula")
     
     with st.form("kayit_formu"):
         
-        # 1. SATIR: Dosya Bilgileri (HUKUK TÜRÜ BURAYA EKLENDİ)
+        # 1. SATIR: Dosya Bilgileri
         st.write("###### 🗂 Dosya Bilgileri")
         c1, c2, c3, c4 = st.columns(4)
         
-        # Dava Türü Seçimi (En başa alındı)
         turler = ["⚖️ ÖZEL HUKUK", "🛑 CEZA HUKUKU", "⚡ İCRA HUKUKU", "🏛️ İDARE HUKUKU"]
         secili_idx = 0
         if veri["Dava Türü"] in turler: secili_idx = turler.index(veri["Dava Türü"])
         
-        y_tur = c1.selectbox("Hukuk Türü", turler, index=secili_idx) # <-- Burası
+        y_tur = c1.selectbox("Hukuk Türü", turler, index=secili_idx)
         y_mahkeme = c2.text_input("Mahkeme", veri["Mahkeme"])
         y_esas = c3.text_input("Esas No", veri["Esas No"])
         y_karar = c4.text_input("Karar No", veri["Karar No"])
