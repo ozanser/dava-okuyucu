@@ -2,7 +2,6 @@ import streamlit as st
 import PyPDF2
 import re
 import pandas as pd
-import io
 
 # --- 1. AYARLAR ---
 st.set_page_config(page_title="Hukuk Asistanı", layout="wide", page_icon="⚖️")
@@ -93,6 +92,7 @@ st.markdown("---")
 dosya = st.file_uploader("Analiz Edilecek PDF Dosyasını Yükleyin", type="pdf")
 
 if dosya:
+    # Dosya değiştiğinde analizi yap ve session state'e kaydet
     if "analiz_sonucu" not in st.session_state or st.session_state.dosya_adi != dosya.name:
         with st.spinner("Dosya okunuyor..."):
             text = pdf_oku(dosya)
@@ -101,7 +101,7 @@ if dosya:
     
     veri = st.session_state.analiz_sonucu
 
-    # --- DETAYLI BİLGİ ALANLARI (FORM OLMADAN) ---
+    # --- DETAYLI BİLGİ ALANLARI (FORM VE BUTONLAR YOK) ---
     st.subheader("📝 Analiz Detayları")
     
     # 1. SATIR
@@ -112,6 +112,7 @@ if dosya:
     secili_idx = 0
     if veri["Dava Türü"] in turler: secili_idx = turler.index(veri["Dava Türü"])
     
+    # Otomatik seçili gelir, kullanıcı isterse değiştirebilir, anında güncellenir
     y_tur = c1.selectbox("Tür", turler, index=secili_idx)
     y_mahkeme = c2.text_input("Mahkeme", veri["Mahkeme"])
     y_esas = c3.text_input("Esas No", veri["Esas No"])
@@ -142,27 +143,3 @@ if dosya:
     y_vekalet = m_c1.text_input("Vekalet", veri["Vekalet Ücreti"])
     y_gider = m_c2.text_input("Gider", veri["Yargılama Gideri"])
     y_harc = m_c3.text_input("Harç", veri["Harç"])
-
-    st.markdown("---")
-
-    # --- EXCEL İNDİRME ---
-    # Bu veriler artık senin o an ekrana yazdığın güncel verilerdir.
-    guncel_veri = {
-        "Dosya": veri["Dosya Adı"], "Tür": y_tur, "Mahkeme": y_mahkeme,
-        "Esas": y_esas, "Karar": y_karar, "Konu": y_konu,
-        "Davacı": y_davaci, "Davalı": y_davali, "Sonuç": y_sonuc,
-        "Vekalet": y_vekalet, "Gider": y_gider, "Harç": y_harc
-    }
-    
-    df_single = pd.DataFrame([guncel_veri])
-    buffer = io.BytesIO()
-    with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-        df_single.to_excel(writer, index=False, sheet_name='Analiz')
-        
-    st.download_button(
-        label="📥 Bu Analizi Excel Olarak İndir",
-        data=buffer.getvalue(),
-        file_name=f"Analiz_{y_esas.replace('/', '-')}.xlsx",
-        mime="application/vnd.ms-excel",
-        type="primary"
-    )
