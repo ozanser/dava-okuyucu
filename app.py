@@ -12,8 +12,11 @@ VERITABANI_DOSYASI = "dava_arsivi.csv"
 
 def veritabani_yukle():
     if os.path.exists(VERITABANI_DOSYASI): return pd.read_csv(VERITABANI_DOSYASI)
-    cols = ["Dosya Adı", "Mahkeme", "Esas No", "Karar No", "Davacı", "Davacı Vekili", "Davalı", 
-            "Dava Tarihi", "Karar Tarihi", "Sonuç", "Vekalet Ücreti", "Yargılama Gideri", "Harç"]
+    # Dava Konusu sütunu eklendi
+    cols = ["Dosya Adı", "Mahkeme", "Esas No", "Karar No", "Dava Konusu", 
+            "Davacı", "Davacı Vekili", "Davalı", 
+            "Dava Tarihi", "Karar Tarihi", "Sonuç", 
+            "Vekalet Ücreti", "Yargılama Gideri", "Harç"]
     return pd.DataFrame(columns=cols)
 
 def veritabanina_kaydet(yeni_veri):
@@ -46,11 +49,12 @@ def analiz_yap(metin, dosya_adi):
     metin = metni_temizle(metin)
     bilgi = {"Dosya Adı": dosya_adi}
     
-    # Künye
+    # Künye Regex (Dava Konusu Eklendi)
     regexler = {
         "Mahkeme": r"(T\.?C\.?.*?MAHKEMES.*?)Esas",
         "Esas No": r"ESAS\s*NO\s*[:;]?\s*['\"]?,?[:]?\s*(\d{4}/\d+)",
         "Karar No": r"KARAR\s*NO\s*[:;]?\s*['\"]?,?[:]?\s*(\d{4}/\d+)",
+        "Dava Konusu": r"DAVA\s*[:;]?\s*(.*?)(?=DAVA TARİHİ|KARAR TARİHİ|ESAS)", # Dava Konusu burada
         "Davacı": r"DAVACI\s*[:;]?\s*(.*?)(?=VEKİL|DAVALI)",
         "Davacı Vekili": r"(?:DAVACI\s*)?VEKİL[İI]\s*[:;]?\s*(.*?)(?=DAVALI|DAVA)",
         "Davalı": r"DAVALI\s*[:;]?\s*(.*?)(?=VEKİL|DAVA|KONU)",
@@ -84,7 +88,8 @@ with st.sidebar:
     df = veritabani_yukle()
     st.metric("Kayıtlı Dosya", len(df))
     if not df.empty:
-        st.dataframe(df[["Esas No", "Sonuç"]].tail(10), hide_index=True)
+        # Tabloda Dava Konusunu da gösterelim
+        st.dataframe(df[["Esas No", "Dava Konusu", "Sonuç"]].tail(10), hide_index=True)
         st.download_button("Excel İndir", df.to_csv(index=False).encode('utf-8'), "arsiv.csv")
 
 # Upload
@@ -98,56 +103,57 @@ if dosya:
     
     veri = st.session_state.analiz_sonucu
 
-    # --- ÖZET GÖSTERGE (METRİKLER) ---
+    # Özet Kartlar
     st.divider()
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Karar Sonucu", veri["Sonuç"])
-    m2.metric("Vekalet Ücreti", veri["Vekalet Ücreti"])
-    m3.metric("Yargılama Gideri", veri["Yargılama Gideri"])
-    m4.metric("Bakiye Harç", veri["Harç"])
+    m1.metric("Sonuç", veri["Sonuç"])
+    m2.metric("Vekalet", veri["Vekalet Ücreti"])
+    m3.metric("Giderler", veri["Yargılama Gideri"])
+    m4.metric("Harç", veri["Harç"])
     st.divider()
 
     # --- DÜZENLEME FORMU ---
-    st.subheader("📝 Bilgileri Doğrula ve Kaydet")
+    st.subheader("📝 Bilgileri Doğrula")
     
     with st.form("kayit_formu"):
-        c1, c2 = st.columns(2)
         
-        with c1:
-            st.write("###### 🗂 Dosya Bilgileri")
-            y_mahkeme = st.text_input("Mahkeme", veri["Mahkeme"])
-            y_esas = st.text_input("Esas No", veri["Esas No"])
-            y_karar = st.text_input("Karar No", veri["Karar No"])
-            
-            st.write("###### 📅 Tarihler")
-            y_dava_t = st.text_input("Dava Tarihi", veri["Dava Tarihi"])
-            y_karar_t = st.text_input("Karar Tarihi", veri["Karar Tarihi"])
-            
-        with c2:
-            st.write("###### 👥 Taraflar")
-            y_davaci = st.text_input("Davacı", veri["Davacı"])
-            y_vekil = st.text_input("Davacı Vekili", veri["Davacı Vekili"])
-            y_davali = st.text_input("Davalı", veri["Davalı"])
-            
-            st.write("###### 💰 Mali Sonuç")
-            y_sonuc = st.selectbox("Sonuç", ["✅ KABUL", "❌ RED", "⚠️ KISMEN KABUL", "❓ Belirsiz"], index=0)
-            
-            # Mali verileri tek satırda
-            m_c1, m_c2, m_c3 = st.columns(3)
-            y_vekalet = m_c1.text_input("Vekalet", veri["Vekalet Ücreti"])
-            y_gider = m_c2.text_input("Gider", veri["Yargılama Gideri"])
-            y_harc = m_c3.text_input("Harç", veri["Harç"])
+        # 1. SATIR: Kimlik
+        c1, c2, c3 = st.columns(3)
+        y_mahkeme = c1.text_input("Mahkeme", veri["Mahkeme"])
+        y_esas = c2.text_input("Esas No", veri["Esas No"])
+        y_karar = c3.text_input("Karar No", veri["Karar No"])
+        
+        # 2. SATIR: Dava Konusu ve Tarihler (YENİ EKLENDİ)
+        c_konu, c_tar1, c_tar2 = st.columns([2, 1, 1])
+        y_konu = c_konu.text_input("Dava Konusu (DAVA)", veri["Dava Konusu"]) # <-- BURASI GELDİ
+        y_dava_t = c_tar1.text_input("Dava Tarihi", veri["Dava Tarihi"])
+        y_karar_t = c_tar2.text_input("Karar Tarihi", veri["Karar Tarihi"])
 
-        st.write("---")
+        # 3. SATIR: Taraflar
+        st.markdown("---")
+        c4, c5, c6 = st.columns(3)
+        y_davaci = c4.text_input("Davacı", veri["Davacı"])
+        y_vekil = c5.text_input("Davacı Vekili", veri["Davacı Vekili"])
+        y_davali = c6.text_input("Davalı", veri["Davalı"])
+        
+        # 4. SATIR: Mali Detaylar
+        st.markdown("---")
+        m_c0, m_c1, m_c2, m_c3 = st.columns(4)
+        y_sonuc = m_c0.selectbox("Sonuç", ["✅ KABUL", "❌ RED", "⚠️ KISMEN KABUL", "❓ Belirsiz"], index=0)
+        y_vekalet = m_c1.text_input("Vekalet", veri["Vekalet Ücreti"])
+        y_gider = m_c2.text_input("Gider", veri["Yargılama Gideri"])
+        y_harc = m_c3.text_input("Harç", veri["Harç"])
+
+        st.markdown("---")
         if st.form_submit_button("✅ VERİLERİ KAYDET", use_container_width=True):
             kayit = {
                 "Dosya Adı": veri["Dosya Adı"], "Mahkeme": y_mahkeme,
-                "Esas No": y_esas, "Karar No": y_karar,
+                "Esas No": y_esas, "Karar No": y_karar, "Dava Konusu": y_konu,
                 "Davacı": y_davaci, "Davacı Vekili": y_vekil, "Davalı": y_davali,
                 "Dava Tarihi": y_dava_t, "Karar Tarihi": y_karar_t,
                 "Sonuç": y_sonuc, "Vekalet Ücreti": y_vekalet, 
                 "Yargılama Gideri": y_gider, "Harç": y_harc
             }
             veritabanina_kaydet(kayit)
-            st.success("Dosya başarıyla arşivlendi.")
+            st.success("Dosya eksiksiz şekilde arşivlendi.")
             st.rerun()
