@@ -12,8 +12,9 @@ VERITABANI_DOSYASI = "dava_arsivi.csv"
 
 def veritabani_yukle():
     if os.path.exists(VERITABANI_DOSYASI): return pd.read_csv(VERITABANI_DOSYASI)
-    cols = ["Dosya Adı", "Mahkeme", "Esas No", "Karar No", "Dava Konusu", 
-            "Davacı", "Davacı Vekili", "Davalı", "Davalı Vekili", # <-- Davalı Vekili Eklendi
+    # YENİ SÜTUN: "Dava Türü"
+    cols = ["Dosya Adı", "Dava Türü", "Mahkeme", "Esas No", "Karar No", "Dava Konusu", 
+            "Davacı", "Davacı Vekili", "Davalı", "Davalı Vekili",
             "Dava Tarihi", "Karar Tarihi", "Sonuç", 
             "Vekalet Ücreti", "Yargılama Gideri", "Harç"]
     return pd.DataFrame(columns=cols)
@@ -50,6 +51,24 @@ def para_bul(metin, anahtar_kelime_grubu):
         if m: return (m.group(1) or m.group(2)).strip()
     return "0,00 TL"
 
+def dava_turu_belirle(mahkeme_adi, metin):
+    """Mahkeme adına ve içeriğe bakarak dava türünü tahmin eder."""
+    mahkeme_lower = mahkeme_adi.lower()
+    metin_lower = metin.lower()
+    
+    # 1. Öncelik: Mahkeme Adı
+    if "icra" in mahkeme_lower: return "⚡ İCRA HUKUKU"
+    if "ceza" in mahkeme_lower: return "🛑 CEZA HUKUKU"
+    if "idare" in mahkeme_lower or "vergi" in mahkeme_lower: return "🏛️ İDARE HUKUKU"
+    if "sulh hukuk" in mahkeme_lower or "asliye hukuk" in mahkeme_lower or "aile" in mahkeme_lower or "iş" in mahkeme_lower: return "⚖️ ÖZEL HUKUK"
+    
+    # 2. Öncelik: İçerik Kelimeleri
+    if "sanık" in metin_lower or "suç" in metin_lower or "beraat" in metin_lower: return "🛑 CEZA HUKUKU"
+    if "yürütmenin durdurulması" in metin_lower or "iptali" in metin_lower: return "🏛️ İDARE HUKUKU"
+    if "ödeme emri" in metin_lower or "takip" in metin_lower: return "⚡ İCRA HUKUKU"
+    
+    return "⚖️ ÖZEL HUKUK" # Varsayılan
+
 def analiz_yap(metin, dosya_adi):
     metin = metni_temizle(metin)
     bilgi = {"Dosya Adı": dosya_adi}
@@ -61,28 +80,19 @@ def analiz_yap(metin, dosya_adi):
         "Karar No": r"KARAR\s*NO\s*[:;]?\s*['\"]?,?[:]?\s*(\d{4}/\d+)",
         "Dava Konusu": r"\bDAVA\b\s*[:;]?\s*(.*?)(?=DAVA TARİHİ|KARAR TARİHİ|ESAS)",
         "Davacı": r"DAVACI\s*[:;]?\s*(.*?)(?=VEKİL|DAVALI)",
-        
-        # Davacı Vekili: Davacı ile Davalı arasında ara
         "Davacı Vekili": r"(?:DAVACI\s*)?VEKİL[İI]\s*[:;]?\s*(.*?)(?=DAVALI|DAVA)",
-        
         "Davalı": r"DAVALI\s*[:;]?\s*(.*?)(?=VEKİL|DAVA|KONU)",
-        
-        # Davalı Vekili: Davalı ile Dava/Konu arasında ara (YENİ)
-        # Eğer Davalı'dan sonra Vekil kelimesi geliyorsa yakalar.
         "Davalı Vekili": r"DAVALI.*?VEKİL[İI]\s*[:;]?\s*(.*?)(?=DAVA|KONU)",
-        
         "Dava Tarihi": r"DAVA\s*TARİH[İI]\s*[:;]?\s*(\d{2}[./]\d{2}[./]\d{4})",
         "Karar Tarihi": r"KARAR\s*TARİH[İI]\s*[:;]?\s*(\d{2}[./]\d{2}[./]\d{4})"
     }
     
     for k, v in regexler.items():
         m = re.search(v, metin, re.IGNORECASE)
-        if m:
-            raw_val = m.group(1).strip().replace(":", "")
-            bilgi[k] = raw_val
-        else:
-            # Bulamazsa BOŞ BIRAK (Tire (-) koyma)
-            bilgi[k] = "" 
+        bilgi[k] = m.group(1).strip().replace(":", "") if m else ""
+
+    # DAVA TÜRÜNÜ BELİRLE (YENİ FONKSİYON)
+    bilgi["Dava Türü"] = dava_turu_belirle(bilgi["Mahkeme"], metin)
 
     # Sonuç
     alan = metin.upper()[-3000:]
@@ -107,7 +117,8 @@ with st.sidebar:
     df = veritabani_yukle()
     st.metric("Kayıtlı Dosya", len(df))
     if not df.empty:
-        st.dataframe(df[["Esas No", "Dava Konusu", "Sonuç"]].tail(10), hide_index=True)
+        # Tabloya Dava Türünü de ekledik
+        st.dataframe(df[["Esas No", "Dava Türü", "Sonuç"]].tail(10), hide_index=True)
         st.download_button("Excel İndir", df.to_csv(index=False).encode('utf-8'), "arsiv.csv")
 
 # Upload
@@ -124,10 +135,10 @@ if dosya:
     # Özet Kartlar
     st.divider()
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Sonuç", veri["Sonuç"])
-    m2.metric("Vekalet", veri["Vekalet Ücreti"])
-    m3.metric("Giderler", veri["Yargılama Gideri"])
-    m4.metric("Harç", veri["Harç"])
+    m1.metric("Hukuk Türü", veri["Dava Türü"]) # <-- BURASI YENİ
+    m2.metric("Sonuç", veri["Sonuç"])
+    m3.metric("Vekalet", veri["Vekalet Ücreti"])
+    m4.metric("Giderler", veri["Yargılama Gideri"])
     st.divider()
 
     # --- DÜZENLEME FORMU ---
@@ -135,19 +146,28 @@ if dosya:
     
     with st.form("kayit_formu"):
         
-        # 1. SATIR: Kimlik
-        c1, c2, c3 = st.columns(3)
+        # 1. SATIR: Tür ve Kimlik
+        st.write("###### 🗂 Dosya Bilgileri")
+        c0, c1, c2, c3 = st.columns(4)
+        
+        # Dava Türü Seçimi (Otomatik gelir, elle değiştirebilirsin)
+        turler = ["⚖️ ÖZEL HUKUK", "🛑 CEZA HUKUKU", "⚡ İCRA HUKUKU", "🏛️ İDARE HUKUKU"]
+        secili_tur_index = 0
+        if veri["Dava Türü"] in turler:
+            secili_tur_index = turler.index(veri["Dava Türü"])
+            
+        y_tur = c0.selectbox("Dava Türü", turler, index=secili_tur_index)
         y_mahkeme = c1.text_input("Mahkeme", veri["Mahkeme"])
         y_esas = c2.text_input("Esas No", veri["Esas No"])
         y_karar = c3.text_input("Karar No", veri["Karar No"])
         
-        # 2. SATIR: Dava Konusu ve Tarihler
+        # 2. SATIR: Konu ve Tarih
         c_konu, c_tar1, c_tar2 = st.columns([2, 1, 1])
         y_konu = c_konu.text_input("Dava Konusu", veri["Dava Konusu"]) 
         y_dava_t = c_tar1.text_input("Dava Tarihi", veri["Dava Tarihi"])
         y_karar_t = c_tar2.text_input("Karar Tarihi", veri["Karar Tarihi"])
 
-        # 3. SATIR: Taraflar (Artık 4 Kolon: Davacı, Vekili, Davalı, Vekili)
+        # 3. SATIR: Taraflar
         st.markdown("---")
         st.write("###### 👥 Taraflar")
         c4, c5 = st.columns(2)
@@ -156,7 +176,7 @@ if dosya:
         
         c6, c7 = st.columns(2)
         y_davali = c6.text_input("Davalı", veri["Davalı"])
-        y_davali_vekil = c7.text_input("Davalı Vekili", veri["Davalı Vekili"]) # <-- Yeni Kutu
+        y_davali_vekil = c7.text_input("Davalı Vekili", veri["Davalı Vekili"])
         
         # 4. SATIR: Mali Detaylar
         st.markdown("---")
@@ -169,8 +189,8 @@ if dosya:
         st.markdown("---")
         if st.form_submit_button("✅ VERİLERİ KAYDET", use_container_width=True):
             kayit = {
-                "Dosya Adı": veri["Dosya Adı"], "Mahkeme": y_mahkeme,
-                "Esas No": y_esas, "Karar No": y_karar, "Dava Konusu": y_konu,
+                "Dosya Adı": veri["Dosya Adı"], "Dava Türü": y_tur,
+                "Mahkeme": y_mahkeme, "Esas No": y_esas, "Karar No": y_karar, "Dava Konusu": y_konu,
                 "Davacı": y_davaci, "Davacı Vekili": y_d_vekil, 
                 "Davalı": y_davali, "Davalı Vekili": y_davali_vekil,
                 "Dava Tarihi": y_dava_t, "Karar Tarihi": y_karar_t,
