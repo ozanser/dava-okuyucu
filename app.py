@@ -12,7 +12,6 @@ VERITABANI_DOSYASI = "dava_arsivi.csv"
 
 def veritabani_yukle():
     if os.path.exists(VERITABANI_DOSYASI): return pd.read_csv(VERITABANI_DOSYASI)
-    # Dava Konusu sütunu eklendi
     cols = ["Dosya Adı", "Mahkeme", "Esas No", "Karar No", "Dava Konusu", 
             "Davacı", "Davacı Vekili", "Davalı", 
             "Dava Tarihi", "Karar Tarihi", "Sonuç", 
@@ -26,10 +25,15 @@ def veritabanina_kaydet(yeni_veri):
     df.to_csv(VERITABANI_DOSYASI, index=False)
 
 def metni_temizle(metin):
+    # Satır sonlarını boşlukla birleştir (Böylece alt satıra geçen parantez içleri bölünmez)
     temiz = metin.replace("\n", " ").strip()
     temiz = re.sub(r'\s+', ' ', temiz)
     temiz = re.sub(r'(?<=\d)\?(?=\d)', '0', temiz)
-    duzeltmeler = {r"HAK M": "HAKİM", r"KAT P": "KATİP", r"VEK L": "VEKİL", r"T RAZ": "İTİRAZ", r"PTAL": "İPTAL"}
+    
+    duzeltmeler = {
+        r"HAK M": "HAKİM", r"KAT P": "KATİP", r"VEK L": "VEKİL", 
+        r"T RAZ": "İTİRAZ", r"PTAL": "İPTAL"
+    }
     for b, d in duzeltmeler.items(): temiz = re.sub(b, d, temiz, flags=re.IGNORECASE)
     return temiz
 
@@ -49,12 +53,13 @@ def analiz_yap(metin, dosya_adi):
     metin = metni_temizle(metin)
     bilgi = {"Dosya Adı": dosya_adi}
     
-    # Künye Regex (Dava Konusu Eklendi)
+    # Künye Regex
     regexler = {
         "Mahkeme": r"(T\.?C\.?.*?MAHKEMES.*?)Esas",
         "Esas No": r"ESAS\s*NO\s*[:;]?\s*['\"]?,?[:]?\s*(\d{4}/\d+)",
         "Karar No": r"KARAR\s*NO\s*[:;]?\s*['\"]?,?[:]?\s*(\d{4}/\d+)",
-        "Dava Konusu": r"DAVA\s*[:;]?\s*(.*?)(?=DAVA TARİHİ|KARAR TARİHİ|ESAS)", # Dava Konusu burada
+        # BURASI DEĞİŞTİ: Parantez dahil her şeyi alır
+        "Dava Konusu": r"DAVA\s*[:;]?\s*(.*?)(?=DAVA TARİHİ|KARAR TARİHİ|ESAS)", 
         "Davacı": r"DAVACI\s*[:;]?\s*(.*?)(?=VEKİL|DAVALI)",
         "Davacı Vekili": r"(?:DAVACI\s*)?VEKİL[İI]\s*[:;]?\s*(.*?)(?=DAVALI|DAVA)",
         "Davalı": r"DAVALI\s*[:;]?\s*(.*?)(?=VEKİL|DAVA|KONU)",
@@ -63,7 +68,11 @@ def analiz_yap(metin, dosya_adi):
     }
     for k, v in regexler.items():
         m = re.search(v, metin, re.IGNORECASE)
-        bilgi[k] = m.group(1).strip().replace(":", "") if m else "-"
+        if m:
+            raw_val = m.group(1).strip().replace(":", "")
+            bilgi[k] = raw_val
+        else:
+            bilgi[k] = "-"
 
     # Sonuç
     alan = metin.upper()[-2500:]
@@ -88,7 +97,6 @@ with st.sidebar:
     df = veritabani_yukle()
     st.metric("Kayıtlı Dosya", len(df))
     if not df.empty:
-        # Tabloda Dava Konusunu da gösterelim
         st.dataframe(df[["Esas No", "Dava Konusu", "Sonuç"]].tail(10), hide_index=True)
         st.download_button("Excel İndir", df.to_csv(index=False).encode('utf-8'), "arsiv.csv")
 
@@ -123,9 +131,10 @@ if dosya:
         y_esas = c2.text_input("Esas No", veri["Esas No"])
         y_karar = c3.text_input("Karar No", veri["Karar No"])
         
-        # 2. SATIR: Dava Konusu ve Tarihler (YENİ EKLENDİ)
+        # 2. SATIR: Dava Konusu ve Tarihler
         c_konu, c_tar1, c_tar2 = st.columns([2, 1, 1])
-        y_konu = c_konu.text_input("Dava Konusu (DAVA)", veri["Dava Konusu"]) # <-- BURASI GELDİ
+        # Artık parantezleri SİLMİYORUZ, olduğu gibi gösteriyoruz.
+        y_konu = c_konu.text_input("Dava Konusu", veri["Dava Konusu"]) 
         y_dava_t = c_tar1.text_input("Dava Tarihi", veri["Dava Tarihi"])
         y_karar_t = c_tar2.text_input("Karar Tarihi", veri["Karar Tarihi"])
 
