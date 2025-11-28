@@ -2,27 +2,25 @@ import streamlit as st
 import PyPDF2
 import re
 import pandas as pd
+from collections import Counter
 
-# Sayfa Ayarları (Geniş görünüm ve Başlık)
-st.set_page_config(page_title="Hukuk Asistanı Pro", layout="wide", page_icon="⚖️")
+# Sayfa Ayarları
+st.set_page_config(page_title="Akıllı Hukuk Asistanı", layout="wide", page_icon="⚖️")
 
-# --- SOL MENÜ (SIDEBAR) ---
+# --- SOL MENÜ ---
 with st.sidebar:
-    st.image("https://cdn-icons-png.flaticon.com/512/2237/2237936.png", width=100)
-    st.title("Hukuk Asistanı")
-    st.info("Bu uygulama dava dosyalarını analiz eder ve özet çıkarır.")
-    st.warning("⚠️ Veriler sunucuda kaydedilmez, güvenlidir.")
+    st.title("⚖️ Hukuk Asistanı")
+    st.info("Bu sürüm 'Konu' kısmını metin içeriğine göre tahmin eder.")
     st.write("---")
-    st.write("Geliştirici: [Senin Adın]")
 
 # --- ANA SAYFA ---
-st.title("⚖️ Akıllı Dava Analiz Sistemi")
-st.markdown("PDF dosyanızı aşağıya bırakın, gerisini sisteme bırakın.")
+st.title("📄 Gelişmiş Dava Analizcisi")
+st.markdown("PDF dosyanızı yükleyin, sistem davanın türünü ve detaylarını çıkarsın.")
 
-# Dosya Yükleme Alanı
-uploaded_file = st.file_uploader("", type="pdf", help="Sadece PDF dosyaları kabul edilir.")
+uploaded_file = st.file_uploader("", type="pdf")
 
-# --- FONKSİYONLAR ---
+# --- AKILLI FONKSİYONLAR ---
+
 def pdf_metin_oku(dosya):
     okuyucu = PyPDF2.PdfReader(dosya)
     metin = ""
@@ -30,63 +28,86 @@ def pdf_metin_oku(dosya):
         metin += sayfa.extract_text() or ""
     return metin
 
+def konu_tahmin_et(metin):
+    """
+    Önce başlık arar, bulamazsa kelime sayarak tahmin yürütür.
+    """
+    metin_lower = metin.lower()
+    
+    # 1. YÖNTEM: Açıkça yazılmış başlık ara
+    baslik_kalibi = r"(?i)(KONU|DAVA KONUSU|TALEP KONUSU)\s*[:;]\s*(.*?)(?=\n|AÇIKLAMA)"
+    bulunan = re.search(baslik_kalibi, metin, re.DOTALL)
+    
+    if bulunan:
+        # Başlık bulduysa temizleyip döndür
+        return bulunan.group(2).strip()[:200].replace("\n", " ")
+    
+    # 2. YÖNTEM: Başlık yoksa, kelime avına çık (Puanlama Sistemi)
+    # Hangi kelime hangi dava türüne işaret eder?
+    kategoriler = {
+        "Boşanma / Aile Hukuku": ["boşanma", "velayet", "nafaka", "ziynet", "mal rejimi", "evlilik birliği"],
+        "İş Hukuku / Alacak": ["kıdem", "ihbar", "fazla mesai", "işe iade", "iş akdi", "maaş"],
+        "Ceza Hukuku": ["sanık", "suç", "ceza", "hapis", "beraat", "hakaret", "tehdit", "yaralama"],
+        "Gayrimenkul / Tapu": ["tapu", "tahliye", "kira", "ecrimisil", "arsa", "kamulaştırma"],
+        "Borçlar / Ticaret": ["alacak", "senet", "fatura", "icra", "itirazın iptali", "tazminat"]
+    }
+    
+    skorlar = {}
+    
+    for kategori, kelimeler in kategoriler.items():
+        skor = 0
+        for kelime in kelimeler:
+            skor += metin_lower.count(kelime)
+        skorlar[kategori] = skor
+    
+    # En yüksek puanı alan kategoriyi bul
+    en_yuksek_kategori = max(skorlar, key=skorlar.get)
+    
+    # Eğer hiçbiri geçmiyorsa (Skor 0 ise)
+    if skorlar[en_yuksek_kategori] == 0:
+        return "Genel Hukuk Davası (Konu tespit edilemedi)"
+    
+    return f"{en_yuksek_kategori} (Otomatik Tespit)"
+
 def analiz_et(metin):
+    # Standart verileri çek
     aramalar = {
         "Davacı": r"DAVACI\s*[:;]\s*(.*?)(?=\n)",
         "Davalı": r"DAVALI\s*[:;]\s*(.*?)(?=\n)",
-        "Konu": r"KONU\s*[:;]\s*(.*?)(?=\n)",
         "Esas No": r"ESAS\s*NO\s*[:;]?\s*(\d{4}/\d+)",
-        "Dava Tarihi": r"(\d{1,2}[./]\d{1,2}[./]\d{4})",
         "Karar/Sonuç": r"(HÜKÜM|KARAR|SONUÇ)\s*[:;]\s*(.*)"
     }
     
     sonuclar = {}
+    
+    # Regex ile standart verileri al
     for baslik, kalip in aramalar.items():
         bulunan = re.search(kalip, metin, re.IGNORECASE | re.DOTALL)
-        deger = bulunan.group(1).strip()[:200] if bulunan else "Tespit Edilemedi"
-        # Gereksiz satır sonlarını temizle
+        deger = bulunan.group(1).strip()[:200] if bulunan else "-"
         sonuclar[baslik] = deger.replace("\n", " ")
+    
+    # Konuyu özel fonksiyonumuzla bul
+    sonuclar["Konu / Dava Türü"] = konu_tahmin_et(metin)
+    
     return sonuclar
 
-# --- İŞLEM ALANI ---
+# --- ÇALIŞTIRMA ---
 if uploaded_file:
-    with st.spinner('Dosya okunuyor, lütfen bekleyin...'):
-        ham_metin = pdf_metin_oku(uploaded_file)
+    metin = pdf_metin_oku(uploaded_file)
+    if len(metin) > 50:
+        veriler = analiz_et(metin)
         
-        if len(ham_metin) > 50:
-            veriler = analiz_et(ham_metin)
-            
-            # Verileri Tabloya Çevir (Pandas ile)
-            df = pd.DataFrame(list(veriler.items()), columns=["Bilgi Türü", "Tespit Edilen İçerik"])
-            
-            # İki Kolona Böl: Solda Tablo, Sağda İndirme Butonları
-            col1, col2 = st.columns([2, 1])
-            
-            with col1:
-                st.subheader("📋 Analiz Sonucu")
-                st.table(df) # Şık tablo gösterimi
-            
-            with col2:
-                st.subheader("💾 İşlemler")
-                st.write("Bu analizi bilgisayarına kaydet:")
-                
-                # CSV (Excel) İndirme Butonu
-                csv = df.to_csv(index=False).encode('utf-8')
-                st.download_button(
-                    label="📥 Excel Olarak İndir (CSV)",
-                    data=csv,
-                    file_name='dava_ozeti.csv',
-                    mime='text/csv',
-                )
-                
-                with st.expander("Ham Metni Göster"):
-                    st.text_area("PDF İçeriği", ham_metin, height=200)
-                    
-            st.success("İşlem Başarıyla Tamamlandı! ✅")
-            
-        else:
-            st.error("❌ Bu PDF okunabilir metin içermiyor. (Resim formatında olabilir)")
-
-else:
-    # Dosya yüklenmediyse boş durmasın, bilgi versin
-    st.info("👆 Başlamak için yukarıdan bir dosya seçin.")
+        # Ekrana Yazdır
+        st.subheader("📋 Analiz Sonuçları")
+        
+        # Özel vurgulu gösterim (Metrics)
+        col1, col2 = st.columns(2)
+        col1.success(f"**Tespit Edilen Konu:**\n\n{veriler['Konu / Dava Türü']}")
+        col2.info(f"**Esas No:** {veriler['Esas No']}")
+        
+        # Diğer detaylar tablo olarak
+        df = pd.DataFrame(list(veriler.items()), columns=["Alan", "Bilgi"])
+        st.table(df)
+        
+    else:
+        st.error("Metin okunamadı.")
