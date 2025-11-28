@@ -12,7 +12,6 @@ VERITABANI_DOSYASI = "dava_arsivi.csv"
 
 def veritabani_yukle():
     if os.path.exists(VERITABANI_DOSYASI): return pd.read_csv(VERITABANI_DOSYASI)
-    # YENİ SÜTUN: "Dava Türü"
     cols = ["Dosya Adı", "Dava Türü", "Mahkeme", "Esas No", "Karar No", "Dava Konusu", 
             "Davacı", "Davacı Vekili", "Davalı", "Davalı Vekili",
             "Dava Tarihi", "Karar Tarihi", "Sonuç", 
@@ -56,18 +55,17 @@ def dava_turu_belirle(mahkeme_adi, metin):
     mahkeme_lower = mahkeme_adi.lower()
     metin_lower = metin.lower()
     
-    # 1. Öncelik: Mahkeme Adı
     if "icra" in mahkeme_lower: return "⚡ İCRA HUKUKU"
     if "ceza" in mahkeme_lower: return "🛑 CEZA HUKUKU"
     if "idare" in mahkeme_lower or "vergi" in mahkeme_lower: return "🏛️ İDARE HUKUKU"
     if "sulh hukuk" in mahkeme_lower or "asliye hukuk" in mahkeme_lower or "aile" in mahkeme_lower or "iş" in mahkeme_lower: return "⚖️ ÖZEL HUKUK"
     
-    # 2. Öncelik: İçerik Kelimeleri
+    # İçerik kontrolü
     if "sanık" in metin_lower or "suç" in metin_lower or "beraat" in metin_lower: return "🛑 CEZA HUKUKU"
     if "yürütmenin durdurulması" in metin_lower or "iptali" in metin_lower: return "🏛️ İDARE HUKUKU"
     if "ödeme emri" in metin_lower or "takip" in metin_lower: return "⚡ İCRA HUKUKU"
     
-    return "⚖️ ÖZEL HUKUK" # Varsayılan
+    return "⚖️ ÖZEL HUKUK"
 
 def analiz_yap(metin, dosya_adi):
     metin = metni_temizle(metin)
@@ -89,9 +87,13 @@ def analiz_yap(metin, dosya_adi):
     
     for k, v in regexler.items():
         m = re.search(v, metin, re.IGNORECASE)
-        bilgi[k] = m.group(1).strip().replace(":", "") if m else ""
+        if m:
+            raw_val = m.group(1).strip().replace(":", "")
+            bilgi[k] = raw_val
+        else:
+            bilgi[k] = "" 
 
-    # DAVA TÜRÜNÜ BELİRLE (YENİ FONKSİYON)
+    # Tür Belirle
     bilgi["Dava Türü"] = dava_turu_belirle(bilgi["Mahkeme"], metin)
 
     # Sonuç
@@ -117,7 +119,6 @@ with st.sidebar:
     df = veritabani_yukle()
     st.metric("Kayıtlı Dosya", len(df))
     if not df.empty:
-        # Tabloya Dava Türünü de ekledik
         st.dataframe(df[["Esas No", "Dava Türü", "Sonuç"]].tail(10), hide_index=True)
         st.download_button("Excel İndir", df.to_csv(index=False).encode('utf-8'), "arsiv.csv")
 
@@ -135,7 +136,7 @@ if dosya:
     # Özet Kartlar
     st.divider()
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Hukuk Türü", veri["Dava Türü"]) # <-- BURASI YENİ
+    m1.metric("Hukuk Türü", veri["Dava Türü"])
     m2.metric("Sonuç", veri["Sonuç"])
     m3.metric("Vekalet", veri["Vekalet Ücreti"])
     m4.metric("Giderler", veri["Yargılama Gideri"])
@@ -146,22 +147,21 @@ if dosya:
     
     with st.form("kayit_formu"):
         
-        # 1. SATIR: Tür ve Kimlik
+        # 1. SATIR: Dosya Bilgileri (HUKUK TÜRÜ BURAYA EKLENDİ)
         st.write("###### 🗂 Dosya Bilgileri")
-        c0, c1, c2, c3 = st.columns(4)
+        c1, c2, c3, c4 = st.columns(4)
         
-        # Dava Türü Seçimi (Otomatik gelir, elle değiştirebilirsin)
+        # Dava Türü Seçimi (En başa alındı)
         turler = ["⚖️ ÖZEL HUKUK", "🛑 CEZA HUKUKU", "⚡ İCRA HUKUKU", "🏛️ İDARE HUKUKU"]
-        secili_tur_index = 0
-        if veri["Dava Türü"] in turler:
-            secili_tur_index = turler.index(veri["Dava Türü"])
-            
-        y_tur = c0.selectbox("Dava Türü", turler, index=secili_tur_index)
-        y_mahkeme = c1.text_input("Mahkeme", veri["Mahkeme"])
-        y_esas = c2.text_input("Esas No", veri["Esas No"])
-        y_karar = c3.text_input("Karar No", veri["Karar No"])
+        secili_idx = 0
+        if veri["Dava Türü"] in turler: secili_idx = turler.index(veri["Dava Türü"])
         
-        # 2. SATIR: Konu ve Tarih
+        y_tur = c1.selectbox("Hukuk Türü", turler, index=secili_idx) # <-- Burası
+        y_mahkeme = c2.text_input("Mahkeme", veri["Mahkeme"])
+        y_esas = c3.text_input("Esas No", veri["Esas No"])
+        y_karar = c4.text_input("Karar No", veri["Karar No"])
+        
+        # 2. SATIR: Dava Konusu ve Tarihler
         c_konu, c_tar1, c_tar2 = st.columns([2, 1, 1])
         y_konu = c_konu.text_input("Dava Konusu", veri["Dava Konusu"]) 
         y_dava_t = c_tar1.text_input("Dava Tarihi", veri["Dava Tarihi"])
