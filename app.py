@@ -25,10 +25,14 @@ def veritabanina_kaydet(yeni_veri):
     df.to_csv(VERITABANI_DOSYASI, index=False)
 
 def metni_temizle(metin):
-    # Satır sonlarını boşlukla birleştir (Böylece alt satıra geçen parantez içleri bölünmez)
+    # Satırları birleştir
     temiz = metin.replace("\n", " ").strip()
     temiz = re.sub(r'\s+', ' ', temiz)
-    temiz = re.sub(r'(?<=\d)\?(?=\d)', '0', temiz)
+    
+    # OCR Soru işaretlerini temizle (Örn: 1.201,43?)
+    # Eğer rakamın sonundaysa sil, ortasındaysa 0 yap
+    temiz = re.sub(r'(?<=\d)\?(?=\d)', '0', temiz) 
+    temiz = re.sub(r'(?<=\d)\?', '', temiz) 
     
     duzeltmeler = {
         r"HAK M": "HAKİM", r"KAT P": "KATİP", r"VEK L": "VEKİL", 
@@ -45,7 +49,9 @@ def pdf_oku(dosya):
 
 def para_bul(metin, anahtar_kelime_grubu):
     for anahtar in anahtar_kelime_grubu:
-        m = re.search(fr"([\d\.,]+\s*TL).{{0,100}}?{anahtar}|{anahtar}.{{0,100}}?([\d\.,]+\s*TL)", metin, re.IGNORECASE)
+        # Regex: Anahtar kelimenin 100 karakter sağında veya solunda rakam+TL ara
+        regex = fr"([\d\.,]+\s*TL).{{0,100}}?{anahtar}|{anahtar}.{{0,100}}?([\d\.,]+\s*TL)"
+        m = re.search(regex, metin, re.IGNORECASE)
         if m: return (m.group(1) or m.group(2)).strip()
     return "0,00 TL"
 
@@ -53,13 +59,13 @@ def analiz_yap(metin, dosya_adi):
     metin = metni_temizle(metin)
     bilgi = {"Dosya Adı": dosya_adi}
     
-    # Künye Regex
+    # Künye Regex (DÜZELTİLDİ: \bDAVA\b kullanıldı)
     regexler = {
         "Mahkeme": r"(T\.?C\.?.*?MAHKEMES.*?)Esas",
         "Esas No": r"ESAS\s*NO\s*[:;]?\s*['\"]?,?[:]?\s*(\d{4}/\d+)",
         "Karar No": r"KARAR\s*NO\s*[:;]?\s*['\"]?,?[:]?\s*(\d{4}/\d+)",
-        # BURASI DEĞİŞTİ: Parantez dahil her şeyi alır
-        "Dava Konusu": r"DAVA\s*[:;]?\s*(.*?)(?=DAVA TARİHİ|KARAR TARİHİ|ESAS)", 
+        # BURADA DÜZELTME YAPILDI: Sadece 'DAVA' kelimesini arar, 'DAVACI'yı atlar.
+        "Dava Konusu": r"\bDAVA\b\s*[:;]?\s*(.*?)(?=DAVA TARİHİ|KARAR TARİHİ|ESAS)",
         "Davacı": r"DAVACI\s*[:;]?\s*(.*?)(?=VEKİL|DAVALI)",
         "Davacı Vekili": r"(?:DAVACI\s*)?VEKİL[İI]\s*[:;]?\s*(.*?)(?=DAVALI|DAVA)",
         "Davalı": r"DAVALI\s*[:;]?\s*(.*?)(?=VEKİL|DAVA|KONU)",
@@ -75,15 +81,15 @@ def analiz_yap(metin, dosya_adi):
             bilgi[k] = "-"
 
     # Sonuç
-    alan = metin.upper()[-2500:]
+    alan = metin.upper()[-3000:] # Arama alanını genişlettik
     if "KISMEN KABUL" in alan: bilgi["Sonuç"] = "⚠️ KISMEN KABUL"
     elif re.search(r"DAVANIN\s*KABUL", alan) or re.search(r"İTİRAZIN\s*İPTAL", alan): bilgi["Sonuç"] = "✅ KABUL"
     elif re.search(r"DAVANIN\s*RED", alan): bilgi["Sonuç"] = "❌ RED"
     else: bilgi["Sonuç"] = "❓ Belirsiz"
 
-    # Mali
+    # Mali (Anahtar kelimeler artırıldı)
     bilgi["Vekalet Ücreti"] = para_bul(alan, ["vekalet ücreti", "ücreti vekalet"])
-    bilgi["Yargılama Gideri"] = para_bul(alan, ["toplam yargılama gideri", "yapılan masraf"])
+    bilgi["Yargılama Gideri"] = para_bul(alan, ["toplam yargılama gideri", "yapılan masraf", "yargılama giderinin"])
     bilgi["Harç"] = para_bul(alan, ["bakiye", "karar harcı", "eksik kalan"])
     return bilgi
 
@@ -133,7 +139,6 @@ if dosya:
         
         # 2. SATIR: Dava Konusu ve Tarihler
         c_konu, c_tar1, c_tar2 = st.columns([2, 1, 1])
-        # Artık parantezleri SİLMİYORUZ, olduğu gibi gösteriyoruz.
         y_konu = c_konu.text_input("Dava Konusu", veri["Dava Konusu"]) 
         y_dava_t = c_tar1.text_input("Dava Tarihi", veri["Dava Tarihi"])
         y_karar_t = c_tar2.text_input("Karar Tarihi", veri["Karar Tarihi"])
