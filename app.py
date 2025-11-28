@@ -15,15 +15,15 @@ st.markdown("""
     .stError { background-color: #f8d7da; border-left: 5px solid #dc3545; }
     .stInfo { background-color: #e2e3e5; border-left: 5px solid #383d41; }
     .mali-kart {
-        background-color: #f8f9fa;
-        padding: 15px;
-        border-radius: 8px;
-        border: 1px solid #dee2e6;
-        margin-bottom: 10px;
+        background-color: #fff;
+        padding: 20px;
+        border-radius: 10px;
+        border: 1px solid #e0e0e0;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.05);
         text-align: center;
     }
-    .mali-baslik { font-weight: bold; color: #495057; display: block; margin-bottom: 5px;}
-    .mali-tutar { font-size: 1.2rem; font-weight: bold; color: #0d6efd; }
+    .mali-baslik { font-weight: bold; color: #6c757d; display: block; margin-bottom: 5px; font-size: 0.9rem;}
+    .mali-tutar { font-size: 1.5rem; font-weight: bold; color: #2c3e50; }
     div[data-testid="stForm"] { border: 2px solid #f0f2f6; padding: 20px; border-radius: 10px; }
 </style>
 """, unsafe_allow_html=True)
@@ -61,44 +61,49 @@ def pdf_oku(dosya):
         metin += sayfa.extract_text() or ""
     return metin
 
-def para_bul(metin, kelime_listesi):
-    """Verilen kelime listesindeki ifadelerin yanındaki para tutarını bulur."""
-    for kelime in kelime_listesi:
-        # Regex: Sayı + TL (Örn: 1.500,00 TL)
-        regex_str = r"([\d\.,]+\s*TL).*?{0}|{0}.*?([\d\.,]+\s*TL)".format(kelime)
-        m = re.search(regex_str, metin, re.IGNORECASE)
-        if m:
-            return (m.group(1) or m.group(2)).strip()
+def para_bul_hassas(metin, anahtar_kelimeler):
+    """
+    Daha akıllı para bulucu. Aranan kelimenin ÇOK YAKININDAKİ rakamı alır.
+    Böylece uzaktaki vekalet ücretini harç sanmaz.
+    """
+    for kelime in anahtar_kelimeler:
+        # Regex Açıklaması:
+        # 1. ([\d\.,]+\s*TL) -> Rakam ve TL'yi bul
+        # 2. .{0,50}? -> En fazla 50 karakter ilerle (Çok uzağa gitme!)
+        # 3. {kelime} -> Anahtar kelimeyi bul (Örn: yargılama gideri)
+        
+        # Seçenek A: Rakam Önce, Kelime Sonra (Örn: "1.200 TL yargılama gideri")
+        regex_once = fr"([\d\.,]+\s*TL).{{0,50}}?{kelime}"
+        
+        # Seçenek B: Kelime Önce, Rakam Sonra (Örn: "Yargılama gideri olan 1.200 TL")
+        regex_sonra = fr"{kelime}.{{0,50}}?([\d\.,]+\s*TL)"
+        
+        m_once = re.search(regex_once, metin, re.IGNORECASE)
+        m_sonra = re.search(regex_sonra, metin, re.IGNORECASE)
+        
+        if m_once: return m_once.group(1).strip()
+        if m_sonra: return m_sonra.group(1).strip()
+        
     return "-"
 
 def kanun_yolu_bul(metin):
-    """İstinaf/Temyiz süresini ve yerini bulur."""
     bilgi = {"Yer": "Belirtilmemiş", "Süre": "Belirtilmemiş"}
     metin_lower = metin.lower()
-    
-    # Süre Tespiti
-    if "2 hafta" in metin_lower or "iki hafta" in metin_lower:
-        bilgi["Süre"] = "2 Hafta"
-    elif "1 hafta" in metin_lower or "bir hafta" in metin_lower or "7 gün" in metin_lower:
-        bilgi["Süre"] = "1 Hafta (7 Gün)"
+    if "2 hafta" in metin_lower or "iki hafta" in metin_lower: bilgi["Süre"] = "2 Hafta"
+    elif "1 hafta" in metin_lower or "bir hafta" in metin_lower or "7 gün" in metin_lower: bilgi["Süre"] = "1 Hafta (7 Gün)"
     elif "kesin" in metin_lower and "olmak üzere" in metin_lower:
-        bilgi["Süre"] = "KESİN KARAR (İtiraz Yolu Kapalı)"
+        bilgi["Süre"] = "KESİN KARAR"
         bilgi["Yer"] = "-"
         return bilgi
-
-    # Yer Tespiti
-    if "bölge adliye" in metin_lower or "istinaf" in metin_lower:
-        bilgi["Yer"] = "Bölge Adliye Mahkemesi (İstinaf)"
-    elif "yargıtay" in metin_lower or "temyiz" in metin_lower:
-        bilgi["Yer"] = "Yargıtay (Temyiz)"
-        
+    if "bölge adliye" in metin_lower or "istinaf" in metin_lower: bilgi["Yer"] = "Bölge Adliye (İstinaf)"
+    elif "yargıtay" in metin_lower or "temyiz" in metin_lower: bilgi["Yer"] = "Yargıtay (Temyiz)"
     return bilgi
 
 def analiz_yap(metin, dosya_adi):
     metin = metni_temizle(metin)
     bilgi = {"Dosya Adı": dosya_adi}
     
-    # 1. Temel Bilgiler
+    # Temel Bilgiler
     patterns = {
         "Mahkeme": r"(T\.?C\.?.*?MAHKEMES.*?)Esas",
         "Esas No": r"ESAS\s*NO\s*[:;]?\s*['\"]?,?[:]?\s*(\d{4}/\d+)",
@@ -109,12 +114,11 @@ def analiz_yap(metin, dosya_adi):
         m = re.search(v, metin, re.IGNORECASE)
         bilgi[k] = m.group(1).strip() if m else "-"
         
-    # 2. Dava Türü Tespiti
     bilgi["Dava Türü"] = "⚖️ ÖZEL HUKUK"
     if "ceza" in bilgi["Mahkeme"].lower(): bilgi["Dava Türü"] = "🛑 CEZA HUKUKU"
     elif "idare" in bilgi["Mahkeme"].lower(): bilgi["Dava Türü"] = "🏛️ İDARE HUKUKU"
 
-    # 3. Sonuç Analizi (Hüküm Odaklı)
+    # Hüküm Bloğu
     metin_upper = metin.upper()
     hukum_blok = re.search(r"(HÜKÜM|GEREĞİ DÜŞÜNÜLDÜ)\s*[:;](.*)", metin_upper, re.DOTALL)
     alan = hukum_blok.group(2) if hukum_blok else metin_upper[-1000:]
@@ -124,18 +128,32 @@ def analiz_yap(metin, dosya_adi):
     elif re.search(r"DAVANIN\s*RED", alan) or "BERAAT" in alan: bilgi["Sonuç"] = "❌ RED (Davalı)"
     else: bilgi["Sonuç"] = "❓ Belirsiz"
 
-    # 4. Mali Yükümlülükler (Harç, Tazminat, Vekalet)
-    bilgi["Vekalet"] = para_bul(metin, ["vekalet ücreti"])
-    bilgi["Harç"] = para_bul(metin, ["harcın", "harç", "bakiye"])
-    bilgi["Tazminat"] = para_bul(metin, ["inkar tazminatı", "kötü niyet tazminatı", "tazminat"])
+    # --- MALİ AYRIŞTIRMA (HATA BURADA DÜZELTİLDİ) ---
+    # Kelimeleri çok spesifik seçiyoruz ve "para_bul_hassas" kullanıyoruz
     
-    # Tazminat Oranı Bul (%20 veya %40 gibi)
+    # 1. Vekalet Ücreti
+    bilgi["Vekalet"] = para_bul_hassas(alan, ["vekalet ücreti", "ücreti vekalet"])
+    
+    # 2. Harç ve Giderler (Yargılama gideri öncelikli)
+    gider = para_bul_hassas(alan, ["yargılama gideri", "yapılan masraf"])
+    harc = para_bul_hassas(alan, ["karar ve ilam harcı", "bakiye harç", "harcın tahsili"])
+    
+    # Eğer Gider bulunduysa onu göster, yoksa Harcı göster
+    if gider != "-":
+        bilgi["Harç"] = f"{gider} (Gider)"
+    elif harc != "-":
+        bilgi["Harç"] = f"{harc} (Harç)"
+    else:
+        bilgi["Harç"] = "-"
+        
+    # 3. Tazminat
+    bilgi["Tazminat"] = para_bul_hassas(alan, ["inkar tazminatı", "kötü niyet tazminatı"])
+    
     oran = re.search(r"%(\d+)", alan)
     if oran and bilgi["Tazminat"] == "-":
-        bilgi["Tazminat"] = f"%{oran.group(1)} Oranında Tazminat"
+        bilgi["Tazminat"] = f"%{oran.group(1)} Oranında"
 
-    # 5. İtiraz Yolu (Kanun Yolu)
-    itiraz = kanun_yolu_bul(alan) # Sadece hüküm kısmında ara
+    itiraz = kanun_yolu_bul(alan)
     bilgi["İtiraz Yeri"] = itiraz["Yer"]
     bilgi["İtiraz Süresi"] = itiraz["Süre"]
     
@@ -143,15 +161,15 @@ def analiz_yap(metin, dosya_adi):
 
 # --- 4. ARAYÜZ ---
 
-st.title("⚖️ Hukuk Asistanı v3: Tam Kapsamlı Analiz")
-st.markdown("Dava sonucu, tüm mali yükümlülükler ve itiraz süreçleri tek ekranda.")
+st.title("⚖️ Hukuk Asistanı v3.1")
+st.markdown("Hata düzeltmeleri yapıldı: Harç ve Vekalet ücretleri artık karışmıyor.")
 
 with st.sidebar:
     st.header("💾 Arşiv")
     df_db = veritabani_yukle()
     st.metric("İşlenen Dosya", len(df_db))
     if not df_db.empty:
-        st.download_button("Excel İndir", df_db.to_csv(index=False).encode('utf-8'), "dava_arsivi.csv")
+        st.download_button("Excel İndir", df_db.to_csv(index=False).encode('utf-8'), "arsiv.csv")
 
 uploaded_file = st.file_uploader("Dosya Yükle (PDF)", type="pdf")
 
@@ -163,7 +181,6 @@ if uploaded_file:
     
     veri = st.session_state.analiz_sonucu
 
-    # --- ÜST BİLGİ KARTI ---
     renk = "blue"
     if "CEZA" in veri["Dava Türü"]: renk = "red"
     elif "İDARE" in veri["Dava Türü"]: renk = "orange"
@@ -174,43 +191,36 @@ if uploaded_file:
     </div>
     """, unsafe_allow_html=True)
 
-    # --- SEKME YAPISI ---
-    tab1, tab2, tab3 = st.tabs(["📝 Doğrulama & Kayıt", "💰 Mali Tablo", "🚀 İtiraz Yolu"])
+    tab1, tab2, tab3 = st.tabs(["📝 Kayıt", "💰 Mali Tablo", "🚀 İtiraz"])
 
     with tab1:
-        st.subheader("Analiz Sonuçlarını Doğrula")
+        st.subheader("Doğrulama")
         with st.form("kayit_formu"):
             c1, c2 = st.columns(2)
             yeni_esas = c1.text_input("Esas No", veri["Esas No"])
-            
             secenekler = ["✅ KABUL (Davacı)", "❌ RED (Davalı)", "⚠️ KISMEN KABUL", "❓ Belirsiz"]
             idx = 3
             if veri["Sonuç"] in secenekler: idx = secenekler.index(veri["Sonuç"])
             yeni_sonuc = c2.selectbox("Sonuç", secenekler, index=idx)
-
             c3, c4 = st.columns(2)
             yeni_davaci = c3.text_input("Davacı", veri["Davacı"])
             yeni_davali = c4.text_input("Davalı", veri["Davalı"])
-            
             st.write("---")
-            if st.form_submit_button("✅ Onayla ve Veritabanına Kaydet"):
+            if st.form_submit_button("✅ Onayla ve Kaydet"):
                 kayit = veri.copy()
                 kayit.update({"Esas No": yeni_esas, "Sonuç": yeni_sonuc, "Davacı": yeni_davaci, "Davalı": yeni_davali})
                 veritabanina_kaydet(kayit)
                 st.success("Kayıt Başarılı!")
 
     with tab2:
-        st.subheader("💸 Kim, Neyi Ödeyecek?")
-        st.info("Aşağıdaki tutarlar karardan otomatik çekilmiştir. Kaybeden taraf öder.")
-        
+        st.subheader("💸 Mali Sorumluluklar")
         col_m1, col_m2, col_m3 = st.columns(3)
         
         with col_m1:
             st.markdown(f"""
             <div class="mali-kart">
                 <span class="mali-baslik">⚖️ Vekalet Ücreti</span>
-                <span class="mali-tutar">{veri['Vekalet']}</span>
-                <br><small>Avukata ödenir</small>
+                <span class="mali-tutar" style="color:#e67e22">{veri['Vekalet']}</span>
             </div>
             """, unsafe_allow_html=True)
             
@@ -218,33 +228,22 @@ if uploaded_file:
             st.markdown(f"""
             <div class="mali-kart">
                 <span class="mali-baslik">🏛️ Harç & Giderler</span>
-                <span class="mali-tutar">{veri['Harç']}</span>
-                <br><small>Devlete/Davacıya ödenir</small>
+                <span class="mali-tutar" style="color:#2980b9">{veri['Harç']}</span>
             </div>
             """, unsafe_allow_html=True)
             
         with col_m3:
             st.markdown(f"""
             <div class="mali-kart">
-                <span class="mali-baslik">⚡ Tazminat (İcra İnkar vb.)</span>
-                <span class="mali-tutar">{veri['Tazminat']}</span>
-                <br><small>Ceza tazminatı</small>
+                <span class="mali-baslik">⚡ Tazminat</span>
+                <span class="mali-tutar" style="color:#c0392b">{veri['Tazminat']}</span>
             </div>
             """, unsafe_allow_html=True)
 
     with tab3:
-        st.subheader("📅 Karara İtiraz Rehberi")
-        
-        if "KESİN" in veri["İtiraz Süresi"]:
-            st.error("⛔ BU KARAR KESİNDİR. İtiraz yolu kapalıdır.")
+        st.subheader("📅 İtiraz Rehberi")
+        if "KESİN" in veri["İtiraz Süresi"]: st.error("⛔ BU KARAR KESİNDİR.")
         else:
             c_yol1, c_yol2 = st.columns(2)
-            with c_yol1:
-                st.warning(f"📍 **Başvuru Yeri:**\n\n{veri['İtiraz Yeri']}")
-            with c_yol2:
-                st.warning(f"⏳ **Son Başvuru Süresi:**\n\n{veri['İtiraz Süresi']}")
-                
-            st.markdown("""
-            > **Önemli Not:** Süreler, gerekçeli kararın size **tebliğ edildiği** tarihten itibaren başlar. 
-            > Süreyi kaçırırsanız karar kesinleşir ve icraya konulabilir.
-            """)
+            c_yol1.warning(f"📍 **Yer:** {veri['İtiraz Yeri']}")
+            c_yol2.warning(f"⏳ **Süre:** {veri['İtiraz Süresi']}")
