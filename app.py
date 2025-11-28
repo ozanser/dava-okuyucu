@@ -53,22 +53,37 @@ def analiz_yap(metin, dosya_adi):
     metin = metni_temizle(metin)
     bilgi = {"Dosya Adı": dosya_adi}
     
+    # Regex Kalıpları
     regexler = {
         "Mahkeme": r"(T\.?C\.?.*?MAHKEMES.*?)Esas",
         "Esas No": r"ESAS\s*NO\s*[:;]?\s*['\"]?,?[:]?\s*(\d{4}/\d+)",
         "Karar No": r"KARAR\s*NO\s*[:;]?\s*['\"]?,?[:]?\s*(\d{4}/\d+)",
         "Dava Konusu": r"\bDAVA\b\s*[:;]?\s*(.*?)(?=DAVA TARİHİ|KARAR TARİHİ|ESAS)",
-        "Davacı": r"DAVACI\s*[:;]?\s*(.*?)(?=VEKİL|DAVALI)",
+        
+        # --- ÇOKLU TARAF İÇİN GENİŞLETİLMİŞ ARAMA ---
+        # "DAVACI" kelimesinden sonra "VEKİL" veya "DAVALI" görene kadar ne varsa al.
+        # re.DOTALL sayesinde birden fazla satırı da kapsar.
+        "Davacı": r"DAVACI(?:LAR)?\s*[:;]?\s*(.*?)(?=VEKİL|DAVALI)",
         "Davacı Vekili": r"(?:DAVACI\s*)?VEKİL[İI]\s*[:;]?\s*(.*?)(?=DAVALI|DAVA)",
-        "Davalı": r"DAVALI\s*[:;]?\s*(.*?)(?=VEKİL|DAVA|KONU)",
+        
+        # "DAVALI" kelimesinden sonra "VEKİL", "DAVA" veya "KONU" görene kadar ne varsa al.
+        "Davalı": r"DAVALI(?:LAR)?\s*[:;]?\s*(.*?)(?=VEKİL|DAVA|KONU)",
         "Davalı Vekili": r"DAVALI.*?VEKİL[İI]\s*[:;]?\s*(.*?)(?=DAVA|KONU)",
+        
         "Dava Tarihi": r"DAVA\s*TARİH[İI]\s*[:;]?\s*(\d{2}[./]\d{2}[./]\d{4})",
         "Karar Tarihi": r"KARAR\s*TARİH[İI]\s*[:;]?\s*(\d{2}[./]\d{2}[./]\d{4})"
     }
     
     for k, v in regexler.items():
-        m = re.search(v, metin, re.IGNORECASE)
-        bilgi[k] = m.group(1).strip().replace(":", "") if m else ""
+        # re.DOTALL ile satır atlamaları yoksayarak geniş arama yapıyoruz
+        m = re.search(v, metin, re.IGNORECASE | re.DOTALL)
+        if m:
+            # Bulunan metni temizle (Çoklu boşlukları sil, gereksiz karakterleri at)
+            raw_val = m.group(1).replace(":", "").strip()
+            # Eğer çok uzunsa (500 karakterden fazla) muhtemelen hata yapmıştır, kırp.
+            bilgi[k] = raw_val[:500] 
+        else:
+            bilgi[k] = "" 
 
     bilgi["Dava Türü"] = dava_turu_belirle(bilgi["Mahkeme"], metin)
 
@@ -107,9 +122,7 @@ if dosya:
     st.write("###### 🗂 Dosya Kimliği")
     c1, c2, c3, c4 = st.columns(4)
     
-    # TÜR: Selectbox yerine Text Input + Disabled yaptık
     c1.text_input("Hukuk Türü", value=veri["Dava Türü"], disabled=True)
-    
     y_mahkeme = c2.text_input("Mahkeme", veri["Mahkeme"])
     y_esas = c3.text_input("Esas No", veri["Esas No"])
     y_karar = c4.text_input("Karar No", veri["Karar No"])
@@ -123,22 +136,20 @@ if dosya:
     # 3. SATIR
     st.markdown("---")
     st.write("###### 👥 Taraflar")
+    # Çoklu isimler uzun olabileceği için text_area (geniş kutu) kullanmak daha iyidir
     c4, c5 = st.columns(2)
-    y_davaci = c4.text_input("Davacı", veri["Davacı"])
-    y_d_vekil = c5.text_input("Davacı Vekili", veri["Davacı Vekili"])
+    y_davaci = c4.text_area("Davacı(lar)", veri["Davacı"], height=68)
+    y_d_vekil = c5.text_area("Davacı Vekili", veri["Davacı Vekili"], height=68)
     
     c6, c7 = st.columns(2)
-    y_davali = c6.text_input("Davalı", veri["Davalı"])
-    y_davali_vekil = c7.text_input("Davalı Vekili", veri["Davalı Vekili"])
+    y_davali = c6.text_area("Davalı(lar)", veri["Davalı"], height=68)
+    y_davali_vekil = c7.text_area("Davalı Vekili", veri["Davalı Vekili"], height=68)
     
     # 4. SATIR
     st.markdown("---")
     st.write("###### 💰 Mali Detaylar")
     m_c0, m_c1, m_c2, m_c3 = st.columns(4)
-    
-    # SONUÇ: Selectbox yerine Text Input + Disabled yaptık
     m_c0.text_input("Sonuç", value=veri["Sonuç"], disabled=True)
-    
     y_vekalet = m_c1.text_input("Vekalet", veri["Vekalet Ücreti"])
     y_gider = m_c2.text_input("Gider", veri["Yargılama Gideri"])
     y_harc = m_c3.text_input("Harç", veri["Harç"])
