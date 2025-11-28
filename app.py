@@ -5,14 +5,52 @@ import pandas as pd
 import io
 
 # --- 1. AYARLAR ---
-st.set_page_config(page_title="Hukuk Asistanı (Dev)", layout="wide", page_icon="🛠️")
+st.set_page_config(page_title="Hukuk Asistanı", layout="wide", page_icon="⚖️")
 
-# --- 2. CSS TASARIMI (Sade) ---
+# --- 2. CSS TASARIMI (BEYAZ TEMA KİLİDİ) ---
 st.markdown("""
 <style>
-    .main { background-color: #f8f9fa; }
-    div[data-testid="stForm"] { background-color: white; padding: 20px; border-radius: 10px; border: 1px solid #ddd; }
-    h1 { color: #2c3e50; }
+    /* 1. Ana Arkaplanı Bembeyaz Yap */
+    .stApp {
+        background-color: #ffffff;
+        color: #31333F; /* Koyu Gri Yazı (Okunaklı) */
+    }
+    
+    /* 2. Yan Menü (Sidebar) Açık Gri Olsun */
+    [data-testid="stSidebar"] {
+        background-color: #f8f9fa;
+        border-right: 1px solid #dee2e6;
+    }
+
+    /* 3. Form Kutularının İçini Beyaz Yap ve Çerçeve Ekle */
+    div[data-testid="stForm"] {
+        background-color: #ffffff;
+        padding: 25px;
+        border-radius: 12px;
+        border: 2px solid #e9ecef;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.02);
+    }
+    
+    /* 4. Başlıkları Koyu Lacivert Yap (Profesyonel Dursun) */
+    h1, h2, h3 {
+        color: #2c3e50 !important;
+    }
+    
+    /* 5. Yazı Giriş Kutularını (Input) Belirginleştir */
+    .stTextInput input, .stSelectbox div[data-baseweb="select"] {
+        background-color: #fdfdfd;
+        color: #333;
+        border-color: #ced4da;
+    }
+    
+    /* 6. Metrik Kutularını Düzenle */
+    div[data-testid="stMetric"] {
+        background-color: #f8f9fa;
+        padding: 15px;
+        border-radius: 8px;
+        border: 1px solid #e9ecef;
+        text-align: center;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -21,7 +59,6 @@ st.markdown("""
 def metni_temizle(metin):
     temiz = metin.replace("\n", " ").strip()
     temiz = re.sub(r'\s+', ' ', temiz)
-    # OCR Soru işareti temizliği
     temiz = re.sub(r'(?<=\d)\?(?=\d)', '0', temiz) 
     temiz = re.sub(r'(?<=\d)\?', '', temiz) 
     
@@ -96,30 +133,36 @@ def analiz_yap(metin, dosya_adi):
 
 # --- 4. ARAYÜZ ---
 
-st.title("🛠️ Hukuk Asistanı (Geliştirme Modu)")
-st.info("Bu modda veritabanı kaydı yapılmaz. Sadece PDF okuma ve analiz testi yapılır.")
+st.title("⚖️ Hukuk Asistanı")
+st.markdown("---")
 
 # Dosya Yükleme
-dosya = st.file_uploader("Test Edilecek PDF'i Yükleyin", type="pdf")
+dosya = st.file_uploader("Analiz Edilecek PDF Dosyasını Buraya Bırakın", type="pdf")
 
 if dosya:
-    # Her dosya yüklemesinde analizi tazelet
     if "analiz_sonucu" not in st.session_state or st.session_state.dosya_adi != dosya.name:
-        with st.spinner("Yapay zeka analiz ediyor..."):
+        with st.spinner("Dosya okunuyor, lütfen bekleyin..."):
             text = pdf_oku(dosya)
             st.session_state.analiz_sonucu = analiz_yap(text, dosya.name)
             st.session_state.dosya_adi = dosya.name
     
     veri = st.session_state.analiz_sonucu
 
-    # --- ANALİZ SONUCU FORMU ---
-    st.write("")
-    st.subheader("🔍 Analiz Sonuçları")
+    # --- ÖZET METRİKLER (Beyaz Temada Şık Görünür) ---
+    c_m1, c_m2, c_m3, c_m4 = st.columns(4)
+    c_m1.metric("Sonuç", veri["Sonuç"])
+    c_m2.metric("Vekalet", veri["Vekalet Ücreti"])
+    c_m3.metric("Giderler", veri["Yargılama Gideri"])
+    c_m4.metric("Harç", veri["Harç"])
+
+    st.write("") 
     
-    # Form kullanıyoruz ki düzenleme yapabilesin (ama kaydetme butonu sadece Excel indirir)
+    # --- FORM ---
+    st.subheader("📝 Analiz Detayları")
+    
     with st.form("analiz_formu"):
         
-        # 1. SATIR
+        # 1. SATIR: Kimlik
         st.write("###### 🗂 Dosya Kimliği")
         c1, c2, c3, c4 = st.columns(4)
         
@@ -132,13 +175,13 @@ if dosya:
         y_esas = c3.text_input("Esas No", veri["Esas No"])
         y_karar = c4.text_input("Karar No", veri["Karar No"])
         
-        # 2. SATIR
+        # 2. SATIR: Konu
         c_konu, c_t1, c_t2 = st.columns([2, 1, 1])
         y_konu = c_konu.text_input("Dava Konusu", veri["Dava Konusu"]) 
         y_dava_t = c_t1.text_input("Dava Tarihi", veri["Dava Tarihi"])
         y_karar_t = c_t2.text_input("Karar Tarihi", veri["Karar Tarihi"])
 
-        # 3. SATIR
+        # 3. SATIR: Taraflar
         st.markdown("---")
         st.write("###### 👥 Taraflar")
         c4, c5 = st.columns(2)
@@ -149,7 +192,7 @@ if dosya:
         y_davali = c6.text_input("Davalı", veri["Davalı"])
         y_davali_vekil = c7.text_input("Davalı Vekili", veri["Davalı Vekili"])
         
-        # 4. SATIR
+        # 4. SATIR: Mali
         st.markdown("---")
         st.write("###### 💰 Mali Detaylar")
         m_c0, m_c1, m_c2, m_c3 = st.columns(4)
@@ -159,14 +202,9 @@ if dosya:
         y_harc = m_c3.text_input("Harç", veri["Harç"])
 
         st.markdown("---")
-        
-        # Bu buton sadece formu tetikler, asıl işlem aşağıda
         submitted = st.form_submit_button("Analizi Güncelle")
 
-    # --- TEK SEFERLİK EXCEL İNDİRME (OPTIONAL) ---
-    # Eğer o anki veriyi almak istersen diye koydum, veritabanı değil, tek dosya çıktısı.
-    
-    # Güncel verileri topla
+    # --- EXCEL İNDİRME ---
     guncel_veri = {
         "Dosya": veri["Dosya Adı"], "Tür": y_tur, "Mahkeme": y_mahkeme,
         "Esas": y_esas, "Karar": y_karar, "Konu": y_konu,
@@ -175,8 +213,6 @@ if dosya:
     }
     
     df_single = pd.DataFrame([guncel_veri])
-    
-    # Excel İndir Butonu (Form dışında)
     buffer = io.BytesIO()
     with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
         df_single.to_excel(writer, index=False, sheet_name='Analiz')
