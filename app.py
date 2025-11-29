@@ -48,7 +48,29 @@ def dava_turu_belirle(mahkeme_adi, metin):
     
     return "⚖️ ÖZEL HUKUK"
 
-# --- ÖZET MOTORLARI ---
+# --- 🔥 MAHKEME ADI ÖZEL TEMİZLEYİCİ FONKSİYON ---
+def mahkeme_adi_bul(metin):
+    # Regex: T.C. ile başlar, MAHKEMESİ kelimesinde biter (ortadaki her şeyi alır)
+    regex = r"(T\.?C\.?\s*)?(.+?MAHKEMES[İI](?:\s+HAKİMLİĞİ)?)"
+    
+    m = re.search(regex, metin, re.IGNORECASE | re.DOTALL)
+    
+    if m:
+        # 1. T.C.'yi ve mahkemeden sonraki gereksiz kelimeleri temizle
+        # GEREKÇELİ KARAR gibi ifadelerden bölerek sadece Mahkeme adını al
+        raw_name = m.group(2) # Grup 2, T.C. hariç Mahkemesi'ne kadar olan kısım.
+        
+        # Gerekçeli Karar, Esas No gibi bitişik kelimelerde böl ve ilk kısmı al
+        temiz_ad = re.split(r"(?:GEREKÇELİ|ESAS|KARAR)\s*(?:NO)?", raw_name, flags=re.IGNORECASE)[0]
+        
+        # Fazla boşlukları ve yeni satırları temizle
+        temiz_ad = re.sub(r'\s+', ' ', temiz_ad).strip()
+        return temiz_ad
+    
+    return ""
+
+# --- GERİ KALAN ANALİZ MOTORLARI ---
+
 def dilekce_ozetle(metin):
     ozet = ""
     konu_ara = re.search(r"(?:KONU|DAVA KONUSU|TALEP KONUSU)\s*[:;]\s*(.*?)(?=\n|AÇIKLAMALAR|TEBLİĞ|HUKUKİ SEBEPLER)", metin, re.IGNORECASE | re.DOTALL)
@@ -71,10 +93,8 @@ def gerekce_analiz_et(metin):
     if yasa: gerekce_ozeti += f"⚖️ DAYANAK: {yasa.group(0)}\n"
     
     sonuc_cumlesi = re.search(r"([^.]*?(?:anlaşılmakla|gerektiği|kanaatine varılarak|sabit görülmekle)[^.]*\.)", icerik, re.IGNORECASE)
-    if sonuc_cumlesi:
-        gerekce_ozeti += f"👉 TESPİT: {sonuc_cumlesi.group(1).strip()}"
-    else:
-        gerekce_ozeti += f"📝 ÖZET: ...{icerik[-400:]}"
+    if sonuc_cumlesi: gerekce_ozeti += f"👉 TESPİT: {sonuc_cumlesi.group(1).strip()}"
+    else: gerekce_ozeti += f"📝 ÖZET: ...{icerik[-400:]}"
     
     return gerekce_ozeti
 
@@ -83,9 +103,12 @@ def analiz_yap(metin, dosya_adı):
     metin = metni_temizle(metin)
     bilgi = {"Dosya Adı": dosya_adı}
     
+    # 1. MAHKEME ADINI EN ÖNCE TEMİZLE (YENİ KOD)
+    mahkeme_adi = mahkeme_adi_bul(metin)
+    bilgi["Mahkeme"] = mahkeme_adi
+    
+    # 2. Geri Kalan Künye Regex
     regexler = {
-        # Mahkeme Adı: Kapsar ve T.C. hariç her şeyi alır.
-        "Mahkeme": r"(?:T\.?C\.?\s*)?(.+?MAHKEMES[İI](?:\s+HAKİMLİĞİ)?)", 
         "Esas No": r"ESAS\s*NO\s*[:;]?\s*['\"]?,?[:]?\s*(\d{4}/\d+)",
         "Karar No": r"KARAR\s*NO\s*[:;]?\s*['\"]?,?[:]?\s*(\d{4}/\d+)",
         "Dava Konusu": r"\bDAVA\b\s*[:;]?\s*(.*?)(?=DAVA TARİHİ|KARAR TARİHİ|ESAS)",
@@ -99,28 +122,13 @@ def analiz_yap(metin, dosya_adı):
     
     for k, v in regexler.items():
         m = re.search(v, metin, re.IGNORECASE | re.DOTALL)
-        if m:
-            raw_val = m.group(1).replace(":", "").strip()
-            bilgi[k] = raw_val[:500]
-        else:
-            bilgi[k] = ""
-    
-    # --- ÖZEL TEMİZLİK: MAHKEME ADI ---
-    if bilgi["Mahkeme"]:
-        temiz_ad = bilgi["Mahkeme"]
-        # T.C. ibaresini ve fazlalıkları (GEREKÇELİ, ESAS NO vb.) kesip atar
-        temiz_ad = re.split(r"(?:GEREKÇELİ|ESAS|KARAR)\s*(?:NO)?", temiz_ad, flags=re.IGNORECASE)[0]
-        bilgi["Mahkeme"] = re.sub(r'\s+', ' ', temiz_ad).strip()
-    # -----------------------------------
+        bilgi[k] = m.group(1).replace(":", "").strip()[:500] if m else ""
 
     bilgi["Dava Türü"] = dava_turu_belirle(bilgi["Mahkeme"], metin)
 
     # Sonuç Analizi
     alan = metin.upper()[-3000:]
-    if "KISMEN KABUL" in alan:
-        bilgi["Sonuç"] = "⚠️ KISMEN KABUL"
-        bilgi["Kazanan"] = "Ortak"
-        bilgi["Ödeme Yönü"] = "Paylaşılır"
+    if "KISMEN KABUL" in alan: bilgi["Sonuç"] = "⚠️ KISMEN KABUL"
     elif re.search(r"DAVANIN\s*KABUL", alan) or re.search(r"İTİRAZIN\s*İPTAL", alan):
         bilgi["Sonuç"] = "✅ KABUL"
         bilgi["Kazanan"] = "DAVACI (Alacaklı)"
@@ -165,7 +173,7 @@ if dosya:
     st.write("###### 🗂 Dosya Künyesi")
     c1, c2, c3, c4 = st.columns(4)
     c1.text_input("Hukuk Türü", value=veri["Dava Türü"], disabled=True)
-    c2.text_input("Mahkeme", veri["Mahkeme"]) # ARTIK TERTEMİZ
+    c2.text_input("Mahkeme", veri["Mahkeme"]) 
     c3.text_input("Esas No", veri["Esas No"])
     c4.text_input("Karar No", veri["Karar No"])
     
