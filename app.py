@@ -48,65 +48,33 @@ def dava_turu_belirle(mahkeme_adi, metin):
     
     return "⚖️ ÖZEL HUKUK"
 
-# --- 🔥 YENİ: DİLEKÇE VE GEREKÇE ÖZETLEYİCİLER ---
-
+# --- ÖZET MOTORLARI ---
 def dilekce_ozetle(metin):
-    """Dava Dilekçesi için Baş (Konu) ve Son (Talep) kısmını birleştirir."""
     ozet = ""
     konu_ara = re.search(r"(?:KONU|DAVA KONUSU)\s*[:;]\s*(.*?)(?=\n|AÇIKLAMALAR|TEBLİĞ)", metin, re.IGNORECASE | re.DOTALL)
-    if konu_ara:
-        ozet += f"📌 KONU: {konu_ara.group(1).replace('\n', ' ').strip()[:300]}...\n"
+    if konu_ara: ozet += f"📌 KONU: {konu_ara.group(1)[:300]}...\n"
     
     talep_ara = re.search(r"(?:NETİCE|SONUÇ VE İSTEM|SONUÇ VE TALEP)\s*[:;]?\s*(.*)", metin, re.IGNORECASE | re.DOTALL)
     if talep_ara:
-        temiz_talep = re.split(r"(?:Av\.|Avukat|Saygılarımla)", talep_ara.group(1), flags=re.IGNORECASE)[0]
-        ozet += f"🎯 TALEP: {temiz_talep.replace('\n', ' ').strip()}"
-    
-    return ozet if ozet else "Dilekçe formatı tespit edilemedi."
+        temiz = re.split(r"(?:Av\.|Avukat|Saygılarımla)", talep_ara.group(1), flags=re.IGNORECASE)[0]
+        ozet += f"🎯 TALEP: {temiz}"
+    return ozet if ozet else "Özet çıkarılamadı."
 
 def gerekce_analiz_et(metin):
-    """
-    Mahkeme Kararı Gerekçesini Özetler.
-    1. Yasa Maddesi (TBK, HMK vb.)
-    2. Kritik Olay (İnkar, İkrar, Bilirkişi)
-    3. Sonuç Cümlesi (Anlaşılmakla...)
-    """
     gerekce_ozeti = ""
-    
-    # Gerekçe Bloğunu Bul
     blok = re.search(r"(GEREKÇE|GEREĞİ DÜŞÜNÜLDÜ)\s*[:;]?(.*?)(HÜKÜM|KARAR)", metin, re.IGNORECASE | re.DOTALL)
-    if not blok: return "Gerekçe metni ayrıştırılamadı."
-    
+    if not blok: return "Gerekçe bloğu bulunamadı."
     icerik = blok.group(2).replace("\n", " ")
     
-    # 1. YASA MADDESİ YAKALA
-    yasa = re.search(r"(TBK|TMK|HMK|İİK|Kanon|Madde)\s*\d+", icerik, re.IGNORECASE)
-    if yasa:
-        gerekce_ozeti += f"⚖️ DAYANAK: Mahkeme {yasa.group(0)} maddesine atıf yapmıştır.\n"
+    yasa = re.search(r"(TBK|TMK|HMK|İİK|Madde)\s*\d+", icerik, re.IGNORECASE)
+    if yasa: gerekce_ozeti += f"⚖️ DAYANAK: {yasa.group(0)}\n"
     
-    # 2. KRİTİK KELİMELERİ YAKALA (Cümle bazlı)
-    # Cümlelere böl
-    cumleler = icerik.split(".")
-    kritik_kelimeler = ["inkar", "kabul etmiş sayıl", "bilirkişi", "ispat", "süresinde", "haklı", "haksız"]
+    if "inkar" in icerik: gerekce_ozeti += "👉 TESPİT: İmza/Borç inkarı değerlendirilmiştir.\n"
+    if "kabul etmiş sayıl" in icerik: gerekce_ozeti += "👉 TESPİT: Davalı iddiaları kabul etmiş sayılmıştır.\n"
     
-    for cumle in cumleler:
-        for kelime in kritik_kelimeler:
-            if kelime in cumle.lower():
-                # Çok uzun cümleleri kısalt
-                temiz_cumle = cumle.strip()[:200]
-                if temiz_cumle and temiz_cumle not in gerekce_ozeti:
-                    gerekce_ozeti += f"👉 TESPİT: ...{temiz_cumle}...\n"
-                break # Aynı cümleyi tekrar yazma
-    
-    # 3. SONUÇ BAĞLACI
-    sonuc_cumlesi = re.search(r"([^.]*?anlaşılmakla[^.]*)", icerik, re.IGNORECASE)
-    if sonuc_cumlesi:
-        gerekce_ozeti += f"✅ SONUÇ: {sonuc_cumlesi.group(1).strip()}"
-        
-    return gerekce_ozeti if len(gerekce_ozeti) > 10 else "Gerekçe çok kısa veya standart dışı."
+    return gerekce_ozeti if len(gerekce_ozeti) > 5 else "Detaylı gerekçe bulunamadı."
 
 def analiz_yap(metin, dosya_adi):
-    # Orijinal metni sakla
     ham_metin = metin
     metin = metni_temizle(metin)
     bilgi = {"Dosya Adı": dosya_adi}
@@ -130,19 +98,19 @@ def analiz_yap(metin, dosya_adi):
 
     bilgi["Dava Türü"] = dava_turu_belirle(bilgi["Mahkeme"], metin)
 
+    # Sonuç Analizi
     alan = metin.upper()[-3000:]
-    
     if "KISMEN KABUL" in alan:
         bilgi["Sonuç"] = "⚠️ KISMEN KABUL"
         bilgi["Kazanan"] = "Ortak"
         bilgi["Ödeme Yönü"] = "Paylaşılır"
     elif re.search(r"DAVANIN\s*KABUL", alan) or re.search(r"İTİRAZIN\s*İPTAL", alan):
         bilgi["Sonuç"] = "✅ KABUL"
-        bilgi["Kazanan"] = "DAVACI"
+        bilgi["Kazanan"] = "DAVACI (Alacaklı)"
         bilgi["Ödeme Yönü"] = "🔴 DAVALI ÖDER -> 🔵 DAVACIYA"
     elif re.search(r"DAVANIN\s*RED", alan):
         bilgi["Sonuç"] = "❌ RED"
-        bilgi["Kazanan"] = "DAVALI"
+        bilgi["Kazanan"] = "DAVALI (Borçlu)"
         bilgi["Ödeme Yönü"] = "🔵 DAVACI ÖDER -> 🔴 DAVALIYA"
     else:
         bilgi["Sonuç"] = "❓ Belirsiz"
@@ -153,9 +121,9 @@ def analiz_yap(metin, dosya_adi):
     bilgi["Yargılama Gideri"] = para_bul(alan, ["toplam yargılama gideri", "yapılan masraf", "yargılama giderinin"])
     bilgi["Harç"] = para_bul(alan, ["bakiye", "karar harcı", "eksik kalan"])
     
-    # ÖZETLERİ ÇIKAR
-    bilgi["Gerekçe Özeti"] = gerekce_analiz_et(ham_metin) # Mahkeme Kararıysa
-    bilgi["Dilekçe Özeti"] = dilekce_ozetle(ham_metin)   # Dava Dilekçesiyse
+    # Özetler
+    bilgi["Gerekçe Özeti"] = gerekce_analiz_et(ham_metin)
+    bilgi["Dilekçe Özeti"] = dilekce_ozetle(ham_metin)
     
     return bilgi
 
@@ -168,32 +136,48 @@ dosya = st.file_uploader("Analiz Edilecek PDF Dosyasını Yükleyin", type="pdf"
 
 if dosya:
     if "analiz_sonucu" not in st.session_state or st.session_state.dosya_adi != dosya.name:
-        with st.spinner("Yapay zeka analiz ediyor..."):
+        with st.spinner("Dosya taranıyor..."):
             text = pdf_oku(dosya)
             st.session_state.analiz_sonucu = analiz_yap(text, dosya.name)
             st.session_state.dosya_adi = dosya.name
     
     veri = st.session_state.analiz_sonucu
 
-    # --- ANALİZ DETAYLARI ---
-    st.subheader("📝 Analiz Detayları")
+    st.subheader("📝 Analiz Raporu")
     
-    # 1. SATIR: Kimlik
-    st.write("###### 🗂 Dosya Kimliği")
+    # 1. SATIR: Dosya Kimliği (Sade)
+    st.write("###### 🗂 Dosya Künyesi")
     c1, c2, c3, c4 = st.columns(4)
     c1.text_input("Hukuk Türü", value=veri["Dava Türü"], disabled=True)
     c2.text_input("Mahkeme", veri["Mahkeme"])
     c3.text_input("Esas No", veri["Esas No"])
     c4.text_input("Karar No", veri["Karar No"])
     
-    # 2. SATIR: Konu
-    c_konu, c_t1, c_t2 = st.columns([2, 1, 1])
+    # 2. SATIR: Dava Konusu
+    c_konu, c_t1 = st.columns([3, 1])
     c_konu.text_input("Dava Konusu", veri["Dava Konusu"]) 
     c_t1.text_input("Dava Tarihi", veri["Dava Tarihi"])
-    c_t2.text_input("Karar Tarihi", veri["Karar Tarihi"])
 
-    # 3. SATIR: Taraflar
     st.markdown("---")
+
+    # --- ÖNEMLİ KISIM (YUKARI ALINDI) ---
+    st.write("###### 🏆 Sonuç ve Mali Tablo")
+    
+    # Sonuç Satırı
+    res1, res2, res3 = st.columns([1, 1, 2])
+    res1.text_input("KARAR SONUCU", value=veri["Sonuç"], disabled=True)
+    res2.text_input("KAZANAN", value=veri["Kazanan"], disabled=True)
+    res3.text_input("ÖDEME YÖNÜ", value=veri["Ödeme Yönü"], disabled=True)
+    
+    # Para Satırı
+    m1, m2, m3 = st.columns(3)
+    m1.text_input("Vekalet Ücreti", veri["Vekalet Ücreti"])
+    m2.text_input("Giderler", veri["Yargılama Gideri"])
+    m3.text_input("Harç", veri["Harç"])
+
+    st.markdown("---")
+
+    # 3. SATIR: Taraflar (Aşağıya alındı)
     st.write("###### 👥 Taraflar")
     c4, c5 = st.columns(2)
     c4.text_area("Davacı Taraf", veri["Davacı"], height=68)
@@ -203,29 +187,13 @@ if dosya:
     c6.text_area("Davalı Taraf", veri["Davalı"], height=68)
     c7.text_area("Davalı Vekili", veri["Davalı Vekili"], height=68)
     
-    # --- YENİ: AKILLI ÖZET ALANI ---
+    # 4. SATIR: Özet (En Altta)
     st.markdown("---")
     st.write("###### 🧠 Yapay Zeka Özeti")
     
-    # Eğer bu bir kararsa Gerekçeyi göster, değilse Dilekçeyi göster
     if "KARAR" in veri["Karar No"] or "HÜKÜM" in text:
-        st.info("Bu bir Mahkeme Kararıdır. Gerekçe analizi aşağıdadır:")
-        st.text_area("Karar Gerekçesi (Özet)", value=veri["Gerekçe Özeti"], height=150)
+        st.info("💡 Mahkeme Gerekçesi Özeti:")
+        st.text_area("Gerekçe", value=veri["Gerekçe Özeti"], height=100)
     else:
-        st.info("Bu bir Dava Dilekçesidir. Talep analizi aşağıdadır:")
-        st.text_area("Dilekçe Özeti (Konu + Talep)", value=veri["Dilekçe Özeti"], height=150)
-
-    # 4. SATIR: SONUÇ
-    st.markdown("---")
-    st.write("###### 🏆 Karar ve Kazanan")
-    res1, res2, res3 = st.columns([1, 1, 2])
-    res1.text_input("Sonuç", value=veri["Sonuç"], disabled=True)
-    res2.text_input("Kazanan Taraf", value=veri["Kazanan"], disabled=True)
-    res3.text_input("Parayı Kim Kime Öder?", value=veri["Ödeme Yönü"], disabled=True)
-
-    # 5. SATIR: Mali
-    st.write("###### 💰 Mali Yükümlülükler")
-    m1, m2, m3 = st.columns(3)
-    m1.text_input("Vekalet Ücreti", veri["Vekalet Ücreti"])
-    m2.text_input("Giderler", veri["Yargılama Gideri"])
-    m3.text_input("Harç", veri["Harç"])
+        st.info("💡 Dilekçe Talebi Özeti:")
+        st.text_area("Talep", value=veri["Dilekçe Özeti"], height=100)
