@@ -49,7 +49,6 @@ def dava_turu_belirle(mahkeme_adi, metin):
     return "⚖️ ÖZEL HUKUK"
 
 # --- ÖZET MOTORLARI ---
-
 def dilekce_ozetle(metin):
     ozet = ""
     konu_ara = re.search(r"(?:KONU|DAVA KONUSU|TALEP KONUSU)\s*[:;]\s*(.*?)(?=\n|AÇIKLAMALAR|TEBLİĞ|HUKUKİ SEBEPLER)", metin, re.IGNORECASE | re.DOTALL)
@@ -64,7 +63,6 @@ def dilekce_ozetle(metin):
 def gerekce_analiz_et(metin):
     blok = re.search(r"(GEREKÇE|GEREĞİ DÜŞÜNÜLDÜ|TÜRK MİLLETİ ADINA)\s*[:;]?(.*?)(HÜKÜM|KARAR\s*:)", metin, re.IGNORECASE | re.DOTALL)
     if not blok: return "Gerekçe bloğu net ayrıştırılamadı."
-    
     icerik = blok.group(2).replace("\n", " ").strip()
     gerekce_ozeti = ""
     
@@ -76,7 +74,6 @@ def gerekce_analiz_et(metin):
         gerekce_ozeti += f"👉 TESPİT: {sonuc_cumlesi.group(1).strip()}"
     else:
         gerekce_ozeti += f"📝 ÖZET: ...{icerik[-400:]}"
-    
     return gerekce_ozeti
 
 def analiz_yap(metin, dosya_adi):
@@ -85,7 +82,8 @@ def analiz_yap(metin, dosya_adi):
     bilgi = {"Dosya Adı": dosya_adi}
     
     regexler = {
-        "Mahkeme": r"(T\.?C\.?.*?MAHKEMES.*?)Esas",
+        # MAHKEME İÇİN YENİ REGEX: Sadece Büyük Harflerle yazılı MAHKEMESİ kelimesine kadar olan kısmı al
+        "Mahkeme": r"(?:T\.?C\.?\s*)?([A-ZİĞÜŞÖÇ\s\d\.]+MAHKEMES[İI](?:\s+HAKİMLİĞİ)?)",
         "Esas No": r"ESAS\s*NO\s*[:;]?\s*['\"]?,?[:]?\s*(\d{4}/\d+)",
         "Karar No": r"KARAR\s*NO\s*[:;]?\s*['\"]?,?[:]?\s*(\d{4}/\d+)",
         "Dava Konusu": r"\bDAVA\b\s*[:;]?\s*(.*?)(?=DAVA TARİHİ|KARAR TARİHİ|ESAS)",
@@ -100,6 +98,13 @@ def analiz_yap(metin, dosya_adi):
     for k, v in regexler.items():
         m = re.search(v, metin, re.IGNORECASE | re.DOTALL)
         bilgi[k] = m.group(1).replace(":", "").strip()[:500] if m else ""
+
+    # --- ÖZEL TEMİZLİK: MAHKEME ADI ---
+    if bilgi["Mahkeme"]:
+        # T.C. ibaresini ve yeni satırları sil, boşlukları temizle
+        bilgi["Mahkeme"] = bilgi["Mahkeme"].replace("T.C.", "").replace("\n", " ").strip()
+        # Çift boşlukları teke indir
+        bilgi["Mahkeme"] = re.sub(r'\s+', ' ', bilgi["Mahkeme"])
 
     bilgi["Dava Türü"] = dava_turu_belirle(bilgi["Mahkeme"], metin)
 
@@ -126,7 +131,6 @@ def analiz_yap(metin, dosya_adi):
     bilgi["Yargılama Gideri"] = para_bul(alan, ["toplam yargılama gideri", "yapılan masraf", "yargılama giderinin"])
     bilgi["Harç"] = para_bul(alan, ["bakiye", "karar harcı", "eksik kalan"])
     
-    # Özetler
     bilgi["Gerekçe Özeti"] = gerekce_analiz_et(ham_metin)
     bilgi["Dilekçe Özeti"] = dilekce_ozetle(ham_metin)
     
@@ -166,7 +170,7 @@ if dosya:
 
     st.markdown("---")
 
-    # 2. TARAFLAR (YUKARI ALINDI)
+    # 2. TARAFLAR
     st.write("###### 👥 Taraflar")
     c4, c5 = st.columns(2)
     c4.text_area("Davacı Taraf", veri["Davacı"], height=68)
@@ -178,7 +182,7 @@ if dosya:
 
     st.markdown("---")
 
-    # 3. SONUÇ VE MALİ TABLO (AŞAĞI ALINDI)
+    # 3. SONUÇ VE MALİ TABLO
     st.write("###### 🏆 Sonuç ve Mali Tablo")
     res1, res2, res3 = st.columns([1, 1, 2])
     res1.text_input("KARAR SONUCU", value=veri["Sonuç"], disabled=True)
