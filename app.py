@@ -83,9 +83,8 @@ def analiz_yap(metin, dosya_adı):
     metin = metni_temizle(metin)
     bilgi = {"Dosya Adı": dosya_adı}
     
-    # Künye Regex
     regexler = {
-        # MAHKEME: YENİ TEMİZLİK KODU EKLENECEK
+        # Mahkeme Adı: Kapsar ve T.C. hariç her şeyi alır.
         "Mahkeme": r"(?:T\.?C\.?\s*)?(.+?MAHKEMES[İI](?:\s+HAKİMLİĞİ)?)", 
         "Esas No": r"ESAS\s*NO\s*[:;]?\s*['\"]?,?[:]?\s*(\d{4}/\d+)",
         "Karar No": r"KARAR\s*NO\s*[:;]?\s*['\"]?,?[:]?\s*(\d{4}/\d+)",
@@ -109,11 +108,8 @@ def analiz_yap(metin, dosya_adı):
     # --- ÖZEL TEMİZLİK: MAHKEME ADI ---
     if bilgi["Mahkeme"]:
         temiz_ad = bilgi["Mahkeme"]
-        # 1. T.C. ve T.C. den sonraki fazla boşlukları sil
-        temiz_ad = re.sub(r"T\.?C\.?\s*", "", temiz_ad, flags=re.IGNORECASE)
-        # 2. GEREKÇELİ KARAR, ESAS NO vb. kelimelerde böl ve ilk kısmı al (sadece adı kalsın)
+        # T.C. ibaresini ve fazlalıkları (GEREKÇELİ, ESAS NO vb.) kesip atar
         temiz_ad = re.split(r"(?:GEREKÇELİ|ESAS|KARAR)\s*(?:NO)?", temiz_ad, flags=re.IGNORECASE)[0]
-        # 3. Fazla boşlukları temizle
         bilgi["Mahkeme"] = re.sub(r'\s+', ' ', temiz_ad).strip()
     # -----------------------------------
 
@@ -205,7 +201,7 @@ if dosya:
     m2.text_input("Giderler", veri["Yargılama Gideri"])
     m3.text_input("Harç", veri["Harç"])
     
-    # 4. YAPAY ZEKA ÖZETİ
+    # 4. YAPAY ZEKÂ ÖZETİ
     st.markdown("---")
     st.write("###### 🧠 Yapay Zeka Özeti")
     
